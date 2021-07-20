@@ -1,0 +1,32 @@
+Set text in multiple text boxes in cells in a grid in C# WPF
+
+foreach (TextBox tb in theGrid.Children) tb.Text = "the text";
+
+
+        List<TextBox> CPU_array = new List<TextBox>();
+        List<TextBox> Fan_array = new List<TextBox>();
+        List<NumericUpDownLib.UIntegerUpDown> Fan_Numeric_Boxes = new List<NumericUpDownLib.UIntegerUpDown>();
+        List<Slider> Fan_Slider = new List<Slider>();
+        List<ComboBox> Fan_Mode_Controls = new List<ComboBox>();
+		
+		
+		
+		 if (Sample_array[current].Text == 0)
+                    {
+                        Sample_array.Text = min.ToString();																
+                    }
+					
+					
+		   double overal_CPU_temp = 0.0;
+            double overal_CPU_MHz = 0.0;
+            double overal_CPU_Load = 0.0;
+            double overal_fan1_speed = 0.0;
+            double overal_fan2_speed = 0.0;
+            double overal_fan3_speed = 0.0;
+            double overal_fan4_speed = 0.0;
+            double overal_fan5_speed = 0.0;
+            double overal_fan6_speed = 0.0;
+			
+			
+CPU_array.Add(tb);
+Fan_array

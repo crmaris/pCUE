@@ -1,0 +1,804 @@
+Version 1.17.1 - 11th April, 2021
+
+- Fix: Crash on some AMD Opteron/FX/APU A-series (Bulldozer based) CPUs
+- Fix: Crash on old versions of Windows
+
+
+Version 1.17 - 3rd April, 2021
+
+- New: AMD Zen 3 and Zen 2 APU support
+- New: Intel Rocket Lake support
+- New: Preliminary Alder Lake support
+- New: Very preliminary Meteor Lake support
+
+- Fix: "Unsupported CPU" message when only some cores have HT enabled
+- Fix: Epyc Rome/Threadripper 3rd gen Platform detection
+- Fix: Gemini Lake platform detection
+- Fix: Whiskey Lake codename
+- Fix: Incorrect VID reporting on some Celeron/Pentium processors
+- Fix: Crash on Intel Banias based (Pentium/Celeron M) processors
+- Fix: Turbo multiplier detection on Nehalem/Westmere
+- Fix: Bugs related to response to DPI changes
+- Fix: VID reporting on some AMD Athlon64 processors
+
+- Change: Improve accuracy of information on unsupported Intel CPUs
+
+
+Version 1.16 - 29th June, 2020
+
+- New: Intel 10th generation CPU support (Cannon/Ice/Comet Lake)
+- New: Package Power reading for AMD Zen based CPUs
+- New: Very preliminary Intel Tigerlake support
+- New: Preliminary AMD Renoir support
+- New: AMD Picasso detection
+- New: Intel Lakefield detection
+
+- Fix: System hangs during ATI SMBus dump in AIDA64
+- Fix: Crash when display DPI changes
+- Fix: Crash when opening Settings dialog
+- Fix: Main window incorrectly resized when display DPI changes
+- Fix: High CPU usage on unsupported Intel CPUs
+
+- Change: Expand available information on unsupported Intel CPUs
+- Change: Improve stepping detection on supported Intel CPUs
+- Change: Frequency detection changes for Nahelem/Westmere to make it consistent with newer Intel CPUs
+
+
+Version 1.15.1 - 29th August, 2019
+
+- Fix: 32-bit Core Temp fails to start.
+
+
+Version 1.15 - 24th August, 2019
+
+- New: AMD Ryzen 3000 series support.
+- New: Full multi-monitor DPI awareness support.
+
+- Fix: Core Temp randomly freezes during startup.
+- Fix: Improve AMD Zacate APU support.
+
+
+Version 1.14 - 18th May, 2019
+
+- Fix: Ryzen max temperature spikes.
+- Fix: Ryzen APU frequency detection.
+- Fix: Incorrect frequency detection on some UEFI enabled systems.
+
+- Update: Improve Skylake-X stepping detection.
+
+
+Version 1.13 - 8th January, 2019
+
+- New: Add support for 2nd generation Threadripper processors, Socket FP5.
+
+- Fix: Crash when 5 or more cores exceed overheat protection temperature setting.
+- Fix: "No supported CPU detected" on Ryzen processors.
+- Fix: Constant frequency readings on Ryzen processors.
+- Fix: Incorrect readings on Ryzen processors.
+
+
+Version 1.12.1 - 20th May, 2018
+
+- New: Support for AMD Pinnacle Ridge (Ryzen 2) and AMD Raven Ridge (APU).
+
+- Fix: Frequency is always at maximum for early Core iX and Core 2 models.
+- Fix: Recognition of some Sandy Bridge Xeon models.
+
+
+Version 1.11 - 4th November, 2017
+
+- New: Support for AMD EPYC (Naples) processors, Stoney Ridge APUs.
+- New: Multiple processor group support. Fixes detection of CPUs on multi-socket systems with more than a total of 64 threads.
+- New: Support for Intel Coffee Lake, Denverton, Gemini Lake.
+- New: Support for Intel Xeon Phi (untested).
+
+- Fix: AMD processor or core recognition issues on multiple generations.
+- Fix: Some AMD processors reported incorrect Max temperatures when other hardware monitoring utilities are used.
+- Fix: Power detection on multiprocessor Intel machines.
+- Fix: Correct topology information on high-end, high-core systems.
+- Fix: Check for updates on older operating systems.
+- Fix: Settings window Tab control background when themes are disabled in Windows.
+- Fix: L1 Instruction cache was reported as L1 Unified cache on most processors.
+- Fix: L2 cache was incorrectly reported on newer VIA processors.
+- Fix: Multiple other VIA related improvements and fixes.
+
+
+Version 1.10.2 - 7th August, 2017
+
+- New: Support for AMD Bristol Ridge APUs.
+
+- Fix: 1.10 version crash on AMD processors, only populating temperature of first 1-2 cores.
+- Fix: Add correct temperature offsets for AMD Ryzen Threadripper X1920 and X1950.
+- Fix: In multi-socket AMD systems, switching into MiniMode would bring up all hidden windows of all running applications and services.
+- Fix: Support for MCM AMD CPUs. Only the highest temperature per CPU is displayed.
+- Fix: Socket C32 and G34 Opteron code names.
+- Fix: On some AMD Opteron systems the CPU model number is not displayed.
+- Fix: Detection of the C32 and G34 socket types for some Opteron CPUs.
+- Fix: Corrected TjMax on some older desktop Atom chips.
+
+
+Version 1.9 - 8th July, 2017
+
+- New: Intel Skylake-SP and Skylake-X support.
+- New: Preliminary Kaby Lake-X support.
+
+- Fix: Windows 10 support.
+- Fix: Sandy Bridge-E/EN/EP, Ivy Bridge-E/EN/EP, Haswell-E/EP, Broadwell-E/EP codename recognition.
+
+
+Version 1.8.1 - 10th June, 2017
+
+- New: AMD Ryzen support.
+- New: Power consumption notification area (system tray) icon. (Intel only)
+- New: Intel/VIA, right click the Frequency to select which core's frequency to display.
+
+- Fix: Power draw figures are only available on CPU #0 in multi processor systems.
+- Fix: BSOD on some Intel systems.
+- Fix: Core Temp locks up after waking up system from suspend/hibernation due to overheating protection.
+- Fix: AMD Athlon FX-60 Dual Core recognition.
+
+
+Version 1.7 - 18th March, 2017
+
+- Fix: 'to TjMax' appearing on some cores on Intel processors, should be completely resolved now.
+- Fix: Incorrect build date displayed in the About dialog.
+- Fix: Power draw figures are all N/A on some Intel systems.
+
+
+Version 1.6 - 18th February, 2017
+
+- Fix: Runaway memory leak on some machines.
+- Fix: Bus clock detection on Apollo Lake processors.
+- Fix: Occasional 'to TjMax' appearing on some cores on Intel processors. Improved, hopefully fixed.
+
+- Change: Subversion will now be shown in the title and About dialog if it's not 0.
+
+
+Version 1.5 - 19th November, 2016
+
+- New: Support for Intel Kaby Lake, Apollo Lake and Avoton processors.
+
+- Fix: Incorrect multiplier on 45nm and early 32nm Core series processors.
+- Fix: Sometimes power consumption doesn't work on supported processors.
+- Fix: In cases where both IA and GT power figures are N/A, Uncore displays the same value as Package.
+- Fix: Incorrect VID on Intel processors.
+- Fix: Inaccurate TjMax on Silvermont based (22nm Atom) processors.
+- Fix: Incorrect VID on AMD Trinity and newer processors.
+- Fix: Corrected Lynnfield recognition of i5 760, i7 870S.
+- Fix: Crystal Well and Haswell-ULT code names added for the Haswell generation.
+- Fix: VIA Eden X4 was incorrectly named VIA QuadCore.
+
+- Update: G15 applet will be named 'Core Temp' from now on, without the version number.
+
+
+Version 1.4.1 - 12th October, 2016
+
+- New: Power measurements for IA Cores, GT (Graphics core), Uncore and DRAM for Intel Sandy Bridge, Silvermont and newer processors.
+
+- Fix: Version 1.4 crashing on Intel processors without Hyperthreading.
+- Fix: Correct TjMax for Silvermont (22nm Atom based) and newer processors.
+- Fix: Dual and quad core VIA CPU support. Corrected VID detection for newer Nano processors and added support for 28nm CPUs.
+- Fix: Crash when logging is enabled on machines with 20+ cores.
+- Fix: AMD Carrizo temperature detection.
+- Fix: Corrected Xeon D codename to Broadwell-DE.
+
+- Known issues: Some systems running Windows 10 Anniversary may still have driver load failure.
+
+
+Version 1.3 - 10th September, 2016
+
+- New: Support for Xeon D processors.
+
+- Fix: K8 generation of AMD CPUs displayed "Distance to TjMax" text when it was not actually doing that.
+- Fix: Recognition for Xeon W3670, W3680 processors.
+
+- Known issues: Some systems running Windows 10 Anniversary may still have driver load failure.
+
+
+Version 1.2 - 13th August, 2016
+
+- Fix: Recognition for some Xeon processors.
+- Fix: Driver load failure on Windows 7 and Vista.
+
+- Known issues: Some systems running Windows 10 Anniversary may still have driver load failure.
+
+
+Version 1.1 - 2nd July, 2016
+
+- New: Digital Signature is now ALCPU.
+- New: Support for Intel Broadwell-EP.
+- New: Overheat protection can now execute files with arguments. Use : (colon) to separate executable path from its arguments.
+
+- Fix: Corrected frequency detection on some AMD APUs.
+
+- Update: Notification Area icon tooltips will display all of the available core temperatures in "Highest temperature" modes.
+
+
+Version 1.0 RC9 - 4th June, 2016
+
+- New: Added support for AMD Kabini, Mullins, Carrizo, Kaveri and Godavari APUs.
+- New: Added support for Haswell-EP CPUs
+
+- Fix: Update notification popup now identifies it as being Core Temp.
+- Fix: Core Temp crash on update check.
+- Fix: Core Temp window invisible due to being out of desktop bounds.
+- Fix: Haswell Crystal Well frequency and TDP were missing.
+- Fix: AMD Kaveri/Godavari CPUs were stuck at 16C/61F.
+- Fix: Incorrect VID reported for newer AMD FX processors.
+- Fix: AMD Trinity temperature was reported too high.
+- Fix: When 'Display distance to TjMax' option is enabled, no indication string appears on AMD CPUs.
+- Tip: Enabling the option above will result in the same temperature readings as in AMD Overdrive.
+
+
+Version 1.0 RC8 - 21st February, 2016
+
+*** Core Temp Monitor is now available, a Windows Phone and Android apps to monitor your machines from anywhere in the world! 
+More information here: http://www.alcpu.com/forums/viewtopic.php?t=1945
+
+- New: Added support for all current Intel and AMD processors.
+
+- Fix: System lock up/crash in Windows 8/10.
+- Fix: BSOD on AMD Trinity and Richland APUs.
+- Fix: Temperature on Trinity/Richland APUs.
+- Fix: Incorrect bus frequency in Windows 8/10.
+- Fix: Corrected VID for newer AMD processors.
+- Fix: Corrected detection of certain Xeon processors.
+- Fix: Multiple other bugs corrected.
+
+
+Version 1.0 RC6 - 9th October, 2013
+
+- New: Digital signature. Core Temp is digitally signed by 'Artur Liberman', it is now easy to tell that you have a genuine copy of Core Temp.
+- New: Update Checker. Core Temp can now notify you when a new version is available.
+- New: You can now hide the taskbar button and use the system tray icons to pop the window back up.
+- New: Added support AMD's new Richland APU.
+- New: Added support for Intel Haswell and Ivy Bridge-EP CPUs.
+- New: Preliminary support for Bay Trail-T Atoms.
+
+- Fix: BSOD on some Windows 7/8 + UEFI enabled machines.
+- Fix: AMD FX system freezes/crashes/BSOD.
+- Fix: Driver failure when closing Core Temp on another Windows user account.
+- Fix: Corrected detection of certain Xeon processors.
+
+- Update: Ram utilization notification icon added to the Settings --> Notification Area.
+- Update: Logitech G15 applet now supports CPUs with up to 10 cores.
+- Update: System tray icons' tooltips now display their respective core information.
+- Update: Log file will now also contain power consumption.
+- Update: Log file will now keep track of each core on AMD CPUs as well.
+
+
+Version 1.0 RC5 - 28th February, 2013
+
+- New: Multilingual interface. Core Temp now natively supports adding non-English languages.
+- New: Plugin system - 3rd party developers can now create plugins and extensions for Core Temp, both native code and .Net is supported, please see http://www.alcpu.com/CoreTemp/developers.html for more information.
+- New: Added support for Intel Pentium and AMD K5 and newer processors. (detection only, Temperature by Acpi Thermalzones)
+- New: Added support for VIA processors. (C3 - detection only, Temperature by Acpi Thermalzones)
+- New: Intel Sandy Bridge, Ivy Bridge, AMD Bulldozer, Piledriver and Fusion (Trinity, Llano, Brazos) support.
+- New: Max TDP detection on supporting processors.
+- New: Active power consumption on Intel's Sandy Bridge and Ivy Bridge processors.
+
+- Fix: All of the user reported bugs and many more unreported problems.
+
+- Update: Optimized the startup code, Core Temp should now launch 2 to 4 times faster.
+- Update: Optimized many other aspects of the code, Core Temp should now consume much less CPU time than before.
+- Update: Restored support for older OS: Windows XP is now fully supported, Windows 2000 requires security updates KB935839, KB835732 and GDI+. In some cases hotfix KB816542 may be needed as well.
+
+
+Version 0.99.8.0 - 1st September, 2010
+
+- New: Completely new settings dialog, much clearer and easier to use.
+- New: Added Hibernation to Overheat protection options.
+
+- Fix: Mobile Intel Core2 Quad processor recognition issues.
+- Fix: Pentium Dual-Core E6000 series model detection was incorrect.
+
+- Update: TjMax adjusted to 100c (Intel's specs) for 400 and 500 series Atom processors.
+
+
+Version 0.99.7.10 - 1st September, 2010
+
+- New: Enable overheat protection to execute a command every time an overheating occurs or just once.
+- New: TjMax for AMD 10H and 11H family processors (K10/K10.5/Puma - older Turions)
+
+- Fix: Several mobile Intel processor recognition issues.
+- Fix: Mobile AMD processor recognition issues.
+- Fix: Problem with Settings window throwing errors about Scheduled tasks if "Start with Windows" was not checked.
+- Fix: Core Temp may crash on systems when switching between power supplies (wall/battery) or exiting sleep/hibernation mode.
+- Fix: TCaseMax calculation for socket 939 AMD processors.
+
+- Update: Shared memory applications and AMD Phenom derivatives will now show temperature for all of the cores.
+- Update: Core Temp will remember proper screen position on multiple displays, when the 1st display is on the right.
+
+
+Version 0.99.7.7 - 31th July, 2010
+
+- New: Core Temp FAQ is now available online, see About Core Temp dialog.
+- New: System tray icons for CPU speed and CPU load - see System Tray setup under Options.
+- New: Support for the latest mobile AMD processors.
+
+- Fix: Multiple "Fail" messages when the computer exits sleep or plugged into/unplugged from power (laptops).
+- Fix: Several mobile Intel processor recognition issues.
+- Fix: When disabling Windows 7 Taskbar feature with Cycle mode, icons still continue to cycle.
+- Fix: Windows 7 Taskbar settings UI bug.
+
+- Update: "Start with Windows" function in Vista and 7 now works on a per-user basis.
+- Update: Change the time and date layout of the log file name to YYYY-MM-DD HH-MM-SS.
+- Update: All of the readings logged are now numeric only.
+- Update: In single instance mode, the previous instance will be brought to the screen.
+
+- Known issue: Core Temp may stop responding for a period of time or completely lockup on some systems when switching between power supplies (wall/battery) or exiting sleep/hibernation mode.
+
+
+Version 0.99.7.3 - 5th July, 2010
+
+- New: "Start Core Temp with Windows" feature on Windows Vista and 7.
+
+- Fix: Taking a screenshot would not capture the whole window in Vista/7 with aero mode.
+- Fix: Windows 7 taskbar Cycle mode only shows up after the first interval has elapsed.
+- Fix: Overheating protection UI bug.
+- Fix: The Mini-mode menu was not checked when Mini-mode was activated.
+- Fix: Corrected the placement and size of the load label on Phenom based processors.
+- Fix: Order of appearance of the system tray icons in Windows 7.
+
+- Update: The appropriate G15 menu is now checked depending on the status of the G15 plug-in.
+- Update: Added support for 12 core processors to temperature offset adjustment window.
+
+
+Version 0.99.7.0 - 26th June, 2010
+
+- New: Implemented Windows 7 taskbar button features. (Under the Options menu)
+- New: Clock modulation detection for Intel processors.
+- New: Proper support the Phenom II X6 and Athlon L100 series.
+- New: Support for the E3000 Celeron series.
+- New: Displays the processor's manufacturing process. (Lithography)
+
+- Fix: Intel frequency detection.
+- Fix: Frequency doesn't update after exiting from Sleep or Hibernation. (Intel)
+- Fix: Reading and logging intervals in Settings can't be changed.
+- Fix: Minor Intel processor recognition issues.
+- Fix: On some systems the System Information window would flood the screen with errors.
+- Fix: G15 plug-in restarts after resuming from sleep even if it was previously disabled from the menu.
+- Fix: Overheating protection on AMD processors bug.
+
+- Update: Rearranged the main GUI and added new information.
+- Update: Added missing Intel Socket names.
+
+
+Version 0.99.6.1 - 8th May, 2010
+
+- Fix: Overheating protection.
+- Fix: Incorrect detection of some Intel and AMD processors.
+- Fix: Layout problems with AMD Phenom series and newer processors.
+
+- Known issues: Intel processor speed detection displays extremely high numbers.
+
+
+Version 0.99.6.0 - 26th April, 2010
+
+- New: Support for new and upcoming Intel and AMD processors.
+- New: Better recognition of AMD dual/tri core unlocked CPUs.
+- New: Optional 24 hour display on G15 LCD.
+
+- Fix: Platform field blank for newer AMD CPUs.
+- Fix: Some K8 CPUs were unknown or recognized incorrectly.
+- Fix: Overheat protection "Activate at specified temperature" problems were fixed.
+- Fix: Overheat detection does not show a Balloon Tip when user specified temperature value is set.
+- Fix: Temperature displays a negative value when core temperature reaches over TjMax (Intel).
+- Fix: Intel W3500 series Xeons recognized with Core i7 model numbers (ie W3520 shown as Xeon 920)
+- Fix: In certain cases Core 2 Duo T5500 was recognized as a T5450.
+- Fix: G15 LCD display is no longer always-on-top after coming out of sleep or hibernation.
+- Fix: G15 won't display 0.0000v in case VID readings are not supported by the CPU.
+- Fix: In some cases, at Windows startup systemtray icons would not appear.
+
+- Update: Windows XP SP2 or higher is now required.
+- Update: Completely new processor frequency detection algorithm. (for Core 2 generation and newer only)
+- Update: Remove "APICID" from main window as it has very little use.
+
+
+Version 0.99.5.27 - 5th August, 2009
+
+- Fix: Crash on AMD 45nm processors.
+
+
+Version 0.99.5.26 - 3rd August, 2009
+
+- Fix: Incorrect clock speeds reported on some systems. *
+- Fix: At startup Core Temp shows 0 (?) or 21 (?) on AMD K8 series.
+- Fix: Turion MK series recognition was wrong.
+- Fix: Properly detect Atom and Core i7 engineering samples.
+- Fix: Tri-Core AMD CPUs incorrectly shown as having only 2 cores and 2 threads in 64bit Core Temp binary.
+- Fix: System tray text was off center.
+- Fix: Penryn (mobile Core 2) processors reported as having 85C TjMax instead of 90C.
+- Fix: Settings window would open centered, and sometimes out of the desktop area.
+- Fix: System tray icon very small in Windows 2000/XP/2003.
+- Fix: AMD Athlon X2 4x50e series detected as 3x50e.
+- Fix: Using a negative offset on AMD systems results in "42949672xx�C" being displayed.
+- Fix: Add support for Mobile Athlon 64 X2 TK-xx series and Turion 64 MK-xx series.
+- Fix: Workaround added for when Core Temp fails to find supported CPUs on Phenom based systems.
+- Fix: PROCHOT signal from Intel CPUs was not picked up correctly. *
+- Fix: Core Temp would start out of the desktop area, and the main Window couldn't be seen/accessed.
+- Fix: False overheating warning on AMD systems.
+- Fix: False readings of over 200C� on AMD systems. 
+- Fix: High/low temperatures would be reversed when "Show distance to TjMax" was enabled.
+- Fix: Clicking "Defaults" button in settings would enable logging when it should be disabled by default.
+- Fix: 23xx and 83xx series AMD Opterons recognized as 83xx and 23xx respectively.
+- Fix: System tray icons appear incorrectly on AMD K10 and newer CPUs.
+- Fix: "Show highest temp of each CPU" systemtray icon configuration sometimes reports duplicate readings.
+- Fix: G15 applet did not work after resuming from Sleep/Suspend.
+
+- New: Completely new code for processor speed detection. *
+- New: A comprehensive processor information window (F3 or Tools --> System information). *
+- New: Thermal protection mechanism. (Look at Options menu, changed from 0.99.5.20 beta)
+- New: Support for the latest AMD and Intel CPUs.
+- New: Mini mode for GUI. (Double click anywhere to switch between modes) *
+- New: Per core temperature offset adjustment. (Look at Options menu)
+- New: Screenshots are now taken in the lossless but very compact PNG format.
+- New: User defined text colors for main Window. (Options --> Settings)
+- New: Show high/low temperatures. (Press F6 or the Tools menu to reset values)
+- New: On/Off switch for G15 applet in Tools menu.
+- New: Running several instances of Core Temp is now possible (enable in Settings).
+
+- Update: Temp turns Orange when temperature is over TControl, and Red when CPU is thottling/critical.
+- Update: Reorganized menu.
+- Update: TjMax for mobile Atom processors changed to 90C.
+- Update: "Lion" codename for AMD Turion was changed to "Griffin".
+- Update: Completely dropped support for older Windows NT OS, Windows XP or up is required. *
+(For Windows 2000: download GDIPlus.dll here http://www.dll-files.com/dllindex/dll-files.shtml?gdiplus)
+
+
+Version 0.99.4.65 - 23rd January, 2009
+
+Major changes:
+Completely rewritten base code.
+Core Temp is now available in both 32 and 64 bit versions.
+
+- New: CPU detection improved, efficiency improved, speed improved, clock speed detection improved.
+- New: Initial support for Core i5 (Lynnfield).
+- New: Automatically detect Core i7/i5 series TjMax.
+- New: Show real-time TDP of Core i7 processors (still needs work).
+- New: Alternative clock speed detection for Core 2, i7 and i5 series and up.
+- New: Support for all currently available and some future processor families. (Intel & AMD)
+- New: Temperature changes color when temperatures hit high levels to alert the user. (Orange = hot, Red = critical)
+- New: Show (!) besides the temperature of a core which hit critical temp as a notification of past overheating.
+- New: Invalid temperature values are followed by (?) for both Intel and AMD.
+- New: AMD AM2 65nm K8 based processors get a 21c offset to fix incorrect temperature reporting (info from AMD).
+- New: AMD Black Edition processors identified by "BE" suffix after PR rating.
+- New: Display time and date on G15 LCD.
+- New: Complete DPI awareness - Core Temp GUI now scales perfectly with any DPI setting.
+- New: Rewritten algorithm for "Register dump" function, works much faster and more accurate (no ghost devices).
+
+- New: Redesigned log file system:
+1) Settings window allows to start logging when Core Temp starts.
+Logging can be toggled on or off from the Options menu or simply by pressing F4.
+2) Layout is completely changed. Now it's easy to create graphs and the output is more coherent and understandable.
+3) CSV file format is preserved.
+4) Each logging session creates a seperate log file named with time and date of session start.
+5) Logging is now off by default.
+
+- New: Register dump provides much more information:
+1) Supported instruction set.
+2) Supported features.
+3) Manufacturing node.
+4) Default CPU speed, multiplier range and maximum VID.
+5) Bus ratio multiplier.
+6) Processor and OS thread counts.
+7) Cache: Count and size.
+8) Processor topology.
+9) PCI register dump also lists device names when "PCIDEVS.TXT" file is added to Core Temp's directory.
+Link: http://members.datafast.net.au/dft0802/downloads.htm (scroll down a little)
+10) Better output layout, easier to read.
+
+- Fix: Core Temp crashes on Intel multi-processor platforms with Socket #0 unpopulated.
+- Fix: Countless minor bug fixes due to rewritten code base.
+- Fix: System tray icons do not appear after explorer.exe crash/restart
+
+- Update: Core Temp will now work with A0 and A1 revisions of 65nm Core 2 processors.
+- Update: Core Temp will not work on some/all virtual machine software.
+- Update: TjMax values for 65nm Core 2 series adjusted.
+
+
+Version 0.99.3.15 - 13th September, 2008
+
+- New: Properly detect Nehalem TjMax.
+- New: Option to change text & label color in main Core Temp window. (settings in INI file for this version)
+- New: Temperature values change color when temperature goes above a certain value (TCC Offset, Intel only).
+- New: Proper recognition for Intel's E5000 and Q8000 desktop series.
+- New: Code optimizations to reduce CPU usage on Intel processors.
+- New: Improved Atom support.
+- Fix: Minor bugs fixed.
+
+
+Version 0.99.3.0 - 22th August, 2008
+
+- New: Correct TjMax values for 45nm Core 2 series, according to this document: http://intel.wingateweb.com/US08/published/sessions/TMTS001/SF08_TMTS001_100r.pdf
+
+- Fix: When TjMax = 0 (undefined) "Delta to Tjunction" was not added to the temperature string.
+- Fix: On the fly CPU speed didn't pick up changes when EIST was disabled (only C1E active).
+
+
+Version 0.99.2.9 - 18th August, 2008
+
+- Fix: Start with Windows option was broken in 0.99.1.
+- Fix: Default color for the second system tray icon is invisible with WinXP blue theme.
+- Fix: Save screenshot function would create a corrupted BMP in some viewing software.
+- Fix: Nehalem does not report VID like earlier CPUs. VID field now disabled for Nehalem.
+- Fix: Incorrect 65nm Turion X2 code name detection.
+- Fix: Potential bug of improper K10 and up recognition.
+- Fix: Enabling distance to Tj.Max with "Highest temp." for system tray would show the largest distance to Tj.Max instead of smallest.
+- Fix: Vendor ID and Device ID values were reversed in the register dump file.
+- Fix: 3/4 temperatures logged for Phenom X3/X4 instead of 1.
+
+- New: Support for Core Temp plug-ins. (Still in beta phase and not in GUI yet).
+- New: Full support for AMD's Puma platform CPUs (in previous version reffered to as Griffin).
+- New: Initial support for 45nm AMD processors.
+- New: Update K8 and K10 recognition code to support all currently known CPUs.
+- New: Default TDP detection for Nehalem.
+- New: On the fly CPU speed detection.
+- New: Close to system tray option.
+
+- Update: Log file is now produced in CSV format - easily import your logs into Excel.
+- Update: Logging interval is now in Seconds instead of miliseconds.
+- Update: Default logging interval is now 10 seconds.
+- Update: Logging is now off by default.
+
+
+Version 0.99.1.17 - 10th July, 2008
+
+- Fix: Layout when using upto 125% DPI.
+- Fix: Layout problem and extra systemtray icons with Phenom.
+- Fix: Potential crashes while saving a register dump file.
+- Fix: Core Temp icon wasn't showing in About box.
+- Fix: Menu shortcut keys were not available for all menu items.
+- Fix: A few old unnoticable bugs.
+
+- New: Initial Intel Nehalem support.
+- New: Initial support for AMD's Griffin cores - Untested.
+- New: Improved Intel Atom support.
+- New: Support latest AMD K8 CPUs.
+- New: Support for HyperThreaded CPUs. Core Temp will only display the physical cores and average load on each core.
+- New: Support for Pentium E5000 series.
+- New: Display core and thread count per CPU.
+- New: GUI Adjustments of Temperature offset and G15 applet via the Settings window.
+- New: Create a screenshot function. Access from "Options" menu or by F9 shortcut.
+- New: Shortcut key for register dump file: F7.
+- New: Update register dump output: APIC ID, CPU number, Core number, Thread number.
+
+- Update: Move all settings to the ini file out of the registry.
+- Update: Rename ini file to CoreTemp.ini.
+- Update: Temperature offset adjustment works for AMD CPUs as well.
+- Update: Atom Tj.Max adjusted for more accurate readings.
+- Update: Cleaned up code a little bit.
+
+
+Version 0.99.0.16 - 18th May, 2008
+
+- Fix: Incorrect recognition of 45nm Mobile Intel CPUs.
+- Fix: CPU temperature not displayed in Core Temp window on Phenom CPUs (0.98 and 0.98.1).
+- Fix: CPU load would sometimes display -1% load.
+- Fix: AMD K8 would sometimes spike to 206C, the false reading is now ignored.
+- Fix: AMD K8 sometimes constantly reads -49C.
+- Fix: Core Temp does not show up automatically on G15 LCD with 2.02 driver.
+- Fix: Shared memory structure was not properly filled on multiprocessor systems.
+- Fix: System tray setting "Show highest temperature of each CPU" only displays one temperature reading in a multi CPU system.
+- Fix: Certain problems with font resizing should now be fixed.
+- Fix: G15 LCD would not update after using soft buttons.
+- Fix: On temperature display mode change, high and low records were not reset.
+- Fix: Changing the reading interval in settings did not actually update, restart of Core Temp was needed to apply the change.
+- Fix: Incorrect VID detection on 45nm desktop Intel parts.
+
+- New: Shared memory - developers now have access to Core Temp data.
+- New: Register dump to text file function.
+- New: Preliminary Atom (Silverthorne) support - Untested.
+- New: Support for Intel Core 2 Duo E7000 45nm series.
+- New: Option to show a single icon instead of temperature in the system tray.
+- New: Custom font and size for G15 LCD screen or simply use the built in compact font and layout. (via Settings.ini)
+
+- Update: Improved detection of L2 cache on Intel chips for more accurate recognition.
+- Update: Rewritten temperature calculation to fix problems with shared memory. Needs more testing to confirm as 100% working.
+- Update: Default G15 LCD text layout and font changed.
+- Update: Doesn't create a log file containing session start and end times if logging is disabled.
+- Update: Settings.ini file is automatically created with default settings in case one doesn't already exist.
+
+
+Version 0.98.1 - 23rd April, 2008
+
+- Fix: Incorrect recognition of 45nm Intel CPUs in version 0.98.
+
+
+Version 0.98 - 23rd April, 2008
+
+- Fix: Core Temp sometimes crashes when another program tries to access the log file. - Still needs further testing.
+
+- New: Show load percentage per core.
+- New: Adjustable Tj.Max value via *.INI file.
+- New: Option to start Core Temp with Windows.
+- New: Support new Intel Mobile processors
+
+- Update: Maximum logging interval is now 99999ms instead of 9999ms.
+- Update: Log file layout. Shows current temperature, high\low temperature, core load, CPU speed.
+
+
+Version 0.97.1 - 7th March, 2008
+
+- Fix: Phenom did not display proper temperature.
+- Fix: Phenom randomly reports 255C (value ignored).
+- Fix: Phenom displays more than a single system tray icon per CPU.
+- Fix: Phenom 1/4 multipliers rounded improperly.
+
+- Update: C� and F� now will display �C and �F accordingly.
+
+
+Version 0.97 - 5th March, 2008
+
+- New: Vista x64 support - All drivers are now digitally signed!
+- New: Logitech G15 keyboard support - see ReadMe!.txt for details.
+- New: Support 45nm LGA775 Xeon series.
+
+- Fix: Opaque background in system tray wasn't 16x16 pixels.
+- Fix: Yonah based CPUs incorrectly detected.
+- Fix: 1333FSB Dual Core Conroe based Xeon incorrectly detected.
+- Fix: Dreaded cycle of "Driver can't load" messages if driver failed to load.
+- Fix: Socket AM2 Athlon-FX was not recognized.
+
+- Update: Core Temp layout on a Phenom.
+
+
+Version 0.96.1 - 15th January, 2008
+
+- New: Support for Phenom and "Barcelona" Opteron.
+- New: Support all K8 processors.
+- New: Support Intel Celeron M 500 series.
+
+- Fix: Wrong CPU speed on Intel ES chips.
+- Fix: Fix M0 Tjunction max detection.
+- Fix: Intel QX6850 CPU's rating shown as QX6650.
+- Fix: Intel E6550 CPU's rating shown as E6650.
+- Fix: Intel Celeron M 400 series detected incorrectly.
+- Fix: AMD Opteron for Socket AM2 reported as Santa Rosa instead of Santa Ana.
+
+
+Version 0.96 - 31st December, 2007
+
+- New: System tray icons configuration.
+- New: Support for Intel's latest CPUs.
+- New: ClearType font support.
+- New: Time\Date column to the log file.
+- New: Always on top option.
+
+- Fix: Core Temp does not proprerly display temperature and CPU select fields.
+- Fix: Log file layout.
+- Fix: Hide\Show does not properly Minimize\Restore window.
+- Fix: Core code names aren't properly detected. (Intel)
+- Fix: Incorrect\Missing CPU rating when not using stock\maximum multiplier. (Intel)
+- Fix: Wrong CPU clock is reported when using EIST\non-maximum multiplier. (Intel)
+- Fix: Wrong detection of Merom based CPUs.
+- Fix: Single core Athlon 64s and Semprons reading -49C constantly. (Rare)
+- Fix: C2D M0 rev. report very low temperatures. (Tjmax to 100C)
+- Fix: Layout and display of tool tip text in the system tray. (Now shows a core per line)
+
+- Update: Log the start and end of a session even if logging is disabled.
+- Update: Settings and Systray settings windows appear in center of main window.
+- Update: Rename "Tjunction" field to "Tj. Max" to make things clearer.
+
+
+Version 0.95.4 - 22nd August, 2007
+
+- Fix: Core Temp causes restarts/BSODs on start.
+- Fix: Core Temp causes hard shutdowns on some AMD systems.
+- Fix: System tray icons are black squares on less than 32bit desktops.
+- Fix: Some other minor bugs fixed.
+
+- New: Support new Intel CPUs.
+
+
+Version 0.95 - 17th March, 2007
+
+- Fix: Revision F Turion/Turion X2 detected wrong.
+- Fix: Core Temp fully loads one core on a dual core AMD CPU.
+- Fix: Core Temp crashes on Dual Core Opteron 200 series systems.
+- Fix: Core Temp misdetected certain Dual Core Opteron CPUs.
+- Fix: Must set Core Temp to run as Administrator in Vista.
+- Fix: Can't see Core Temp GUI if Core Temp was last closed minimized.
+- Fix: C2D L2 rev. report very low temperatures. (Tjmax to 100C)
+- Fix: Core Temp reported wrong temps after a while. (Driver conflict)
+- Fix: Core Temp reported Max VID on Intel CPUs. (Now shows current)
+
+- New: Show temperature in System tray.
+- New: Manual refresh option by pressing F5 or "File" Menu.
+- New: Show "Delta to Tjunction" temperature for Core 2 CPUs.
+- New: Support for latest Intel and AMD CPUs.
+- New: Minimize/Restore option in system tray icon right click.
+- New: Save last window position.
+- New: Prevent 2 instances of Core Temp from launching.
+
+- Update: Rewritten Intel CPU recognition code.
+- Update: Core 2 Duo codename change to Conroe-2M from Allendale.
+- Update: Pop up bubble-window with temperatures removed.
+- Update: Not Beta status anymore.
+
+
+Version 0.94 - 16th November, 2006
+
+- Update: Only list physical processors in CPU selection.
+- Update: Improve Intel CPU detection.
+
+- Fix: Temperature log file not created in EXE folder.
+- Fix: Temperature log file left "Processor" field blank.
+
+- New: An actual icon for the EXE/System tray.
+- New: An option to display temperature in Fahrenheit.
+- New: An option to start Core Temp minimized.
+
+- Remove: GCPUID button.
+
+
+Version 0.93 - 19th October, 2006
+
+- Update: Remove 49C/35W TCM/TDP (AMD only).
+- Update: Reverse core numbers (AMD only).
+- Update: Start numbering from CPU/Core #0.
+- Update: "TCaseMax" label to "Tjunction" for Core 2 series.
+
+- Fix: Temperature overflow, would show "4294967296C� (?)".
+- Fix: A new "CPU is overheating" message appearing with each temp read.
+- Fix: Wrong VID (not VCore) reported in the 1.0xxV range on Core 2 series.
+
+- New: Detection of CPU "C* State" (C0/C1/C2/C3, Intel only).
+- New: Toggle logging On/Off.
+- New: Select interval for reading temps.
+- New: Select interval for logging.
+- New: Disable CPU overheat warning.
+
+
+Version 0.9.0.91 - 10th July, 2006
+
+-Logging feature added - Just copy into Excel for easy graphing.
+- Fixed a bug where some programs would cause the program's driver to fail.
+
+
+Version 0.9.0.86 - 5th July, 2006
+
+- Removed Sensor Offset support - Since it gave very inaccurate readings.
+- Fixed a bug where a non-CnQ chip would report x4 Multiplier.
+
+
+Version 0.9.0.85 - 5th July, 2006
+
+- Added Sensor Offset support for more accurate results.
+- Fixed a bug with the program failing to show temps lower than 0C.
+
+
+Version 0.9.0.83 - 5th July, 2006
+
+- Fixed a bug with Ballon tip always showing 0C.
+- More text formatting.
+
+
+Version 0.9.0.80 - 4th July, 2006
+
+- Integrated "AMD64 TCaseMax" - For RevE chips only.
+- Added support for the whole K8 series of CPUs.
+- Fixed some small GUI bugs.
+
+
+Version 0.9.0.54 - 18th June, 2006
+
+- Added Revision F AMD CPU support.
+- Added Tjunction detection on Yonah/Conroe/Merom for accurate temperature readings.
+- Fixed some bugs.
+
+
+Version 0.9.0.36 - 12th May, 2006
+
+- Added proper Merom*/Conroe** support.
+- Fixed some GUI problems.
+- Added code to prevent potential endless loop.
+- If "Read Valid" flag is not set, will show (?) after the temperature value.
+
+* On a Merom it will report the temperature delta to Tjunction (Max temp defined by Intel).
+** Conroe might not support this feature.
+
+
+Version 0.9.0.32 - 24th April, 2006 
+
+- First public beta release.
