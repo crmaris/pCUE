@@ -5,7 +5,7 @@
         xmlns:system="clr-namespace:System;assembly=mscorlib"
         xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"      
     
-    Title="pCUE - Cybenetics LTD - v.1.21" Height="450" Width="558.6" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
+    Title="pCUE - Cybenetics LTD - v.1.22" Height="450" Width="558.6" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
 
     <Window.Background>
         <LinearGradientBrush EndPoint="0.5,1" StartPoint="0.5,0">
