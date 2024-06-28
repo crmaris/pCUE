@@ -770,14 +770,18 @@ namespace pCUE
 
         private void Kill_iCUE_Function()
         {
-             foreach (System.Diagnostics.Process pr in System.Diagnostics.Process.GetProcesses()) //GETS PROCESSES
+            try
             {
-                if ((pr.ProcessName == "CueLLAccessService") || (pr.ProcessName == "Corsair.Service.CpuIdRemote64")
-                    || (pr.ProcessName == "Corsair.Service.DisplayAdapter") || (pr.ProcessName == "Corsair.Service"))
+                foreach (System.Diagnostics.Process pr in System.Diagnostics.Process.GetProcesses()) //GETS PROCESSES
                 {
-                    pr.Kill(); //KILLS THE PROCESSES
+                    if ((pr.ProcessName == "CueLLAccessService") || (pr.ProcessName == "Corsair.Service.CpuIdRemote64")
+                        || (pr.ProcessName == "Corsair.Service.DisplayAdapter") || (pr.ProcessName == "Corsair.Service"))
+                    {
+                        pr.Kill(); //KILLS THE PROCESSES
+                    }
                 }
             }
+            catch { }
         }
     
 
