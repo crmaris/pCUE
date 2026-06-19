@@ -415,7 +415,7 @@ namespace pCUE
                                     try
                                     {
                                         _ = Dispatcher.BeginInvoke(new Action(() =>
-                                            DisconnectCommanderPro("Connection lost (HID errors)", System.Windows.Media.Brushes.OrangeRed)));
+                                            DisconnectCommanderPro("● Connection lost (HID errors)", System.Windows.Media.Brushes.OrangeRed)));
                                     }
                                     catch (Exception ex2) { Debug.WriteLine("pCUE: auto-disconnect dispatch failed: " + ex2.Message); }
                                 }
@@ -827,7 +827,7 @@ namespace pCUE
                         //Fan_Speed_Mode.IsEnabled = true;
                         //start polling the fans on a background task
                         StartFanPolling();
-                        SetStatus("Connected", System.Windows.Media.Brushes.LightGreen);
+                        SetStatus("● Connected", System.Windows.Media.Brushes.Lime);
                                       
                     }
 
@@ -835,19 +835,19 @@ namespace pCUE
                     {
                         //await Task.Delay(100);
                         MessageBox.Show("Cannot open Commander Pro!");
-                        SetStatus("Wrong device", System.Windows.Media.Brushes.Orange);
+                        SetStatus("● Wrong device", System.Windows.Media.Brushes.Orange);
                     }
                         
             }
                  catch
                 {
                     MessageBox.Show("Cannot open Commander Pro! Is it connected?");
-                    DisconnectCommanderPro("Device not found", System.Windows.Media.Brushes.Orange);   //shared teardown + UI reset
+                    DisconnectCommanderPro("● Device not found", System.Windows.Media.Brushes.Orange);   //shared teardown + UI reset
                 }
             }
              else if (Open_Corsair_Commander.Content.ToString() == "Close")
                     {
-                        DisconnectCommanderPro("Disconnected", System.Windows.Media.Brushes.Gainsboro);   //shared teardown + UI reset
+                        DisconnectCommanderPro("● Disconnected", System.Windows.Media.Brushes.Gainsboro);   //shared teardown + UI reset
                     }
                 }
 
