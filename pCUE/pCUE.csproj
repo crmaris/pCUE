@@ -191,8 +191,9 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 
-  <!-- Auto-increment the AssemblyFileVersion revision (4th component) on every compile.
-       Only the file version is bumped; AssemblyVersion is intentionally left stable. -->
+  <!-- Auto-increment the AssemblyFileVersion revision (4th component) on every Release compile.
+       Only the file version is bumped; AssemblyVersion is intentionally left stable.
+       Debug builds do NOT bump, to avoid churning AssemblyInfo.cs during development. -->
   <UsingTask TaskName="BumpFileVersionRevision" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
     <ParameterGroup>
       <AssemblyInfoPath ParameterType="System.String" Required="true" />
@@ -222,7 +223,7 @@
     </Task>
   </UsingTask>
 
-  <Target Name="BumpRevisionBeforeCompile" BeforeTargets="CoreCompile">
+  <Target Name="BumpRevisionBeforeCompile" BeforeTargets="CoreCompile" Condition="'$(Configuration)' == 'Release'">
     <BumpFileVersionRevision AssemblyInfoPath="$(MSBuildProjectDirectory)\Properties\AssemblyInfo.cs" />
   </Target>
 </Project>

@@ -57,4 +57,4 @@ using System.Windows;
 // user's saved settings. The build-time revision bump (see pCUE.csproj) only advances
 // the *file* version below, whose 4th component (Revision) increments on each compile.
 [assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.9")]
+[assembly: AssemblyFileVersion("1.3.0.10")]
