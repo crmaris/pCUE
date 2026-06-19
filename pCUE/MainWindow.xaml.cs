@@ -412,7 +412,11 @@ namespace pCUE
                                 //Hand the teardown to the UI thread; never wait on this task from here.
                                 if (Corsair_Commander_Connected)
                                 {
-                                    try { _ = Dispatcher.BeginInvoke(new Action(DisconnectCommanderPro)); }
+                                    try
+                                    {
+                                        _ = Dispatcher.BeginInvoke(new Action(() =>
+                                            DisconnectCommanderPro("Connection lost (HID errors)", System.Windows.Media.Brushes.OrangeRed)));
+                                    }
                                     catch (Exception ex2) { Debug.WriteLine("pCUE: auto-disconnect dispatch failed: " + ex2.Message); }
                                 }
                                 break;   //stop polling now; cleanup finishes on the UI thread
@@ -496,7 +500,7 @@ namespace pCUE
         //Single safe teardown for the Commander Pro connection + UI reset. MUST run on the UI
         //thread. Shared by manual disconnect, connect-failure cleanup and the automatic
         //disconnect that fires after repeated poll failures. Idempotent and null-safe.
-        private void DisconnectCommanderPro()
+        private void DisconnectCommanderPro(string statusText, System.Windows.Media.Brush statusBrush)
         {
             Corsair_Commander_Connected = false;
             StopFanPolling();   //cancellation only - never waits on the poll task
@@ -505,6 +509,14 @@ namespace pCUE
             //reset the UI to the disconnected state
             Open_Corsair_Commander.Content = "Open";
             foreach (TextBox box in Fan_array) { box.Text = "0000"; }
+            SetStatus(statusText, statusBrush);
+        }
+
+        //Updates the connection status label. Must be called on the UI thread.
+        private void SetStatus(string text, System.Windows.Media.Brush brush)
+        {
+            Status_Label.Text = text;
+            Status_Label.Foreground = brush;
         }
 
         private string Commander_Pro_READ_FAN_MASK()
@@ -815,25 +827,27 @@ namespace pCUE
                         //Fan_Speed_Mode.IsEnabled = true;
                         //start polling the fans on a background task
                         StartFanPolling();
+                        SetStatus("Connected", System.Windows.Media.Brushes.LightGreen);
                                       
                     }
 
                     else if (device.GetProductName() != "Commander PRO")
                     {
                         //await Task.Delay(100);
-                        MessageBox.Show("Cannot open Commander Pro!");                      
+                        MessageBox.Show("Cannot open Commander Pro!");
+                        SetStatus("Wrong device", System.Windows.Media.Brushes.Orange);
                     }
                         
             }
                  catch
                 {
                     MessageBox.Show("Cannot open Commander Pro! Is it connected?");
-                    DisconnectCommanderPro();   //shared teardown + UI reset
+                    DisconnectCommanderPro("Device not found", System.Windows.Media.Brushes.Orange);   //shared teardown + UI reset
                 }
             }
              else if (Open_Corsair_Commander.Content.ToString() == "Close")
                     {
-                        DisconnectCommanderPro();   //shared teardown + UI reset
+                        DisconnectCommanderPro("Disconnected", System.Windows.Media.Brushes.Gainsboro);   //shared teardown + UI reset
                     }
                 }
 

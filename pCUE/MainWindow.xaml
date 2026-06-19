@@ -135,5 +135,7 @@
         <CheckBox x:Name="autostartCheckBox" Content="Auto Start" HorizontalAlignment="Left" Margin="10,164,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" Background="#FFF5E242" Checked="Autostart" Unchecked="Autostart"/>
         <TextBox x:Name="Commander_SN" HorizontalAlignment="Left" Height="23" Margin="123,184,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Background="#FF15743E" Foreground="#FFF6F1F1" Grid.ColumnSpan="2"/>
         <Label Content="Commander SN:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,184,0,0" VerticalAlignment="Top" Height="25"/>
+        <Label Content="Status:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="508,309,0,0" VerticalAlignment="Top" Height="25" Grid.ColumnSpan="2"/>
+        <TextBlock x:Name="Status_Label" Grid.ColumnSpan="2" Text="Disconnected" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="510,330,0,0" Width="92" Height="66" TextWrapping="Wrap" TextAlignment="Center" FontWeight="Bold" Foreground="#FFE0E5C8"/>
     </Grid>
 </Window>
