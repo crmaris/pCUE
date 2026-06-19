@@ -190,11 +190,39 @@
     </BootstrapperPackage>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
-       Other similar extension points exist, see Microsoft.Common.targets.
-  <Target Name="BeforeBuild">
+
+  <!-- Auto-increment the AssemblyFileVersion revision (4th component) on every compile.
+       Only the file version is bumped; AssemblyVersion is intentionally left stable. -->
+  <UsingTask TaskName="BumpFileVersionRevision" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <AssemblyInfoPath ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Using Namespace="Microsoft.Build.Framework" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        string text = File.ReadAllText(AssemblyInfoPath);
+        string updated = Regex.Replace(
+            text,
+            "AssemblyFileVersion\\(\"(\\d+)\\.(\\d+)\\.(\\d+)\\.(\\d+)\"\\)",
+            delegate(Match m) {
+                int rev = int.Parse(m.Groups[4].Value) + 1;
+                return "AssemblyFileVersion(\"" + m.Groups[1].Value + "." +
+                       m.Groups[2].Value + "." + m.Groups[3].Value + "." + rev + "\")";
+            });
+        if (updated != text) {
+            File.WriteAllText(AssemblyInfoPath, updated);
+            Log.LogMessage(MessageImportance.High, "pCUE: bumped AssemblyFileVersion revision.");
+        } else {
+            Log.LogMessage(MessageImportance.High, "pCUE: AssemblyFileVersion not found - revision NOT bumped.");
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="BumpRevisionBeforeCompile" BeforeTargets="CoreCompile">
+    <BumpFileVersionRevision AssemblyInfoPath="$(MSBuildProjectDirectory)\Properties\AssemblyInfo.cs" />
   </Target>
-  <Target Name="AfterBuild">
-  </Target>
-  -->
 </Project>

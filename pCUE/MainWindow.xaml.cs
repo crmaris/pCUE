@@ -186,6 +186,16 @@ namespace pCUE
         //Window Functions
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
+            //Show the build-stamped file version (its revision bumps on every build) in the title
+            try
+            {
+                string fileVersion = System.Diagnostics.FileVersionInfo
+                    .GetVersionInfo(System.Reflection.Assembly.GetExecutingAssembly().Location)
+                    .FileVersion;
+                this.Title = "pCUE - Cybenetics LTD - v." + fileVersion;
+            }
+            catch (Exception ex) { Debug.WriteLine("pCUE: could not read file version: " + ex.Message); }
+
             //Fills the Control Lists
             oneShot.Start();
 

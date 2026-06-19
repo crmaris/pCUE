@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Resources;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -51,5 +51,10 @@ using System.Windows;
 // You can specify all the values or you can default the Build and Revision Numbers 
 // by using the '*' as shown below:
 // [assembly: AssemblyVersion("1.0.*")]
+//
+// AssemblyVersion is kept stable on purpose: it is the identity the runtime and the
+// per-user Properties.Settings store key off, so bumping it every build would lose the
+// user's saved settings. The build-time revision bump (see pCUE.csproj) only advances
+// the *file* version below, whose 4th component (Revision) increments on each compile.
 [assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.1.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.2")]
