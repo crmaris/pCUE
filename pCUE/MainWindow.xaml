@@ -5,7 +5,7 @@
         xmlns:system="clr-namespace:System;assembly=mscorlib"
         xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"      
     
-    Title="pCUE - Cybenetics LTD - v.1.3" Height="450" Width="558.6" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
+    Title="pCUE - Cybenetics LTD - v.1.3" Height="450" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
 
     <Window.Background>
         <LinearGradientBrush EndPoint="0.5,1" StartPoint="0.5,0">
@@ -48,19 +48,19 @@
                 <Label Content="Load" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,62,0,0" VerticalAlignment="Top" Height="25" Grid.ColumnSpan="2"/>
                 <Label Content="Temp" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="7,8,0,0" VerticalAlignment="Top" Height="25" Grid.ColumnSpan="2"/>
                 <Button x:Name="Start_CPU_data" Content="Start" Grid.Column="2" HorizontalAlignment="Left" Margin="52.6,97,0,0" VerticalAlignment="Top" Width="75" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Start_CPU_data_Click"/>
-                <CheckBox x:Name="AVG_values" Content="Average Values" Grid.Column="1" HorizontalAlignment="Left" Margin="10,99,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" Grid.ColumnSpan="2" ToolTip="Show AVG values instead of min" Checked="Average_Values" Unchecked="Average_Values"/>
+                <CheckBox x:Name="AVG_values" Content="Average Values" Grid.Column="1" HorizontalAlignment="Left" Margin="10,99,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" Grid.ColumnSpan="2" ToolTip="Show CPU AVG values instead of Min (fans have their own Avg column)" Checked="Average_Values" Unchecked="Average_Values"/>
             </Grid>
         </GroupBox>
-        <GroupBox x:Name="Fan_Box" Header="Fans Current/Min/Max" HorizontalAlignment="Left" Margin="72.8,10,0,0" VerticalAlignment="Top" Height="194" Width="262" Grid.Column="1">
-            <Grid x:Name="Fan_Grid" HorizontalAlignment="Left" Height="184" Margin="4,-6,-5.6,-12.4" VerticalAlignment="Top" Width="252">
+        <GroupBox x:Name="Fan_Box" Header="Fans Current/Min/Max/Avg" HorizontalAlignment="Left" Margin="48,10,0,0" VerticalAlignment="Top" Height="194" Width="324" Grid.Column="1">
+            <Grid x:Name="Fan_Grid" HorizontalAlignment="Left" Height="184" Margin="4,-6,-5.6,-12.4" VerticalAlignment="Top" Width="313">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="20*"/>
                     <RowDefinition Height="3*"/>
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="28*"/>
-                    <ColumnDefinition Width="87*"/>
-                    <ColumnDefinition Width="138*"/>
+                    <ColumnDefinition Width="28"/>
+                    <ColumnDefinition Width="87"/>
+                    <ColumnDefinition Width="198"/>
                 </Grid.ColumnDefinitions>
                 <TextBox x:Name="ed10" HorizontalAlignment="Left" Height="23" Margin="36,10,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.ColumnSpan="2" Grid.Column="1" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
                 <TextBox x:Name="ed11" HorizontalAlignment="Left" Height="23" Margin="10.6,10,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.Column="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
@@ -83,12 +83,18 @@
                 <TextBox x:Name="ed25" HorizontalAlignment="Left" Height="23" Margin="36,150,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.ColumnSpan="2" Grid.Column="1" Grid.RowSpan="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
                 <TextBox x:Name="ed26" HorizontalAlignment="Left" Margin="10.6,150,0,0" TextWrapping="Wrap" Text="0000" Width="56" Grid.Column="2" Height="23" VerticalAlignment="Top" Grid.RowSpan="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
                 <TextBox x:Name="ed27" HorizontalAlignment="Left" Height="23" Margin="71.6,150,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.Column="2" Grid.RowSpan="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
+                <TextBox x:Name="ed28" HorizontalAlignment="Left" Height="23" Margin="132.6,10,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.Column="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
+                <TextBox x:Name="ed29" HorizontalAlignment="Left" Height="23" Margin="132.6,38,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.Column="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
+                <TextBox x:Name="ed30" HorizontalAlignment="Left" Height="23" Margin="132.6,66,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.Column="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
+                <TextBox x:Name="ed31" HorizontalAlignment="Left" Height="23" Margin="132.6,94,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.Column="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
+                <TextBox x:Name="ed32" HorizontalAlignment="Left" Height="23" Margin="132.6,122,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.Column="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
+                <TextBox x:Name="ed33" HorizontalAlignment="Left" Height="23" Margin="132.6,150,0,0" TextWrapping="Wrap" Text="0000" VerticalAlignment="Top" Width="56" Grid.Column="2" Grid.RowSpan="2" FlowDirection="RightToLeft" IsReadOnly="True" Background="#FF10582F" Foreground="#FFF5F0F0"/>
                 <Label Content="Fan #5" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,122,0,13" Grid.ColumnSpan="2"/>
                 <Label Content="Fan #6" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,150,0,0" VerticalAlignment="Top" Height="25" Grid.ColumnSpan="2" Grid.RowSpan="2"/>
                 <Label Content="Fan #4" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,94,0,0" VerticalAlignment="Top" Height="25" Grid.ColumnSpan="2"/>
             </Grid>
         </GroupBox>
-        <GroupBox Header="`" HorizontalAlignment="Left" Margin="10,209,0,0" VerticalAlignment="Top" Height="198" Width="529" Grid.ColumnSpan="2"/>
+        <GroupBox Header="`" HorizontalAlignment="Left" Margin="10,209,0,0" VerticalAlignment="Top" Height="198" Width="594" Grid.ColumnSpan="2"/>
         <Grid x:Name="Fans_Grid" HorizontalAlignment="Left" Height="180" Margin="10,227,0,0" VerticalAlignment="Top" Width="529" Grid.ColumnSpan="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="256*"/>
