@@ -80,6 +80,8 @@ namespace pCUE
         CancellationTokenSource fanPollCts;
         Task fanPollTask;
         volatile bool fanPollErrorLogged = false;
+        //Auto-disconnect once this many poll passes fail back-to-back (a few seconds of dead I/O).
+        const int MaxConsecutivePollFailures = 3;
         
         //gia na exo tin teleia os decimal separator panta
         System.IFormatProvider cultureUS = new System.Globalization.CultureInfo("en-US");      
@@ -357,6 +359,7 @@ namespace pCUE
         //The background loop. One pass runs at a time, so overlapping poll cycles are impossible.
         private async Task FanPollLoop(CancellationToken token)
         {
+            int consecutivePollFailures = 0;
             try
             {
                 while (!token.IsCancellationRequested)
@@ -379,6 +382,7 @@ namespace pCUE
                             }
 
                             fanPollErrorLogged = false;
+                            consecutivePollFailures = 0;
 
                             if (!token.IsCancellationRequested)
                             {
@@ -397,6 +401,21 @@ namespace pCUE
                             {
                                 Debug.WriteLine("pCUE: HID fan poll failed: " + ex.Message);
                                 fanPollErrorLogged = true;
+                            }
+
+                            consecutivePollFailures++;
+                            if (consecutivePollFailures >= MaxConsecutivePollFailures)
+                            {
+                                Debug.WriteLine("pCUE: " + consecutivePollFailures +
+                                    " consecutive HID poll failures - auto-disconnecting Commander Pro.");
+
+                                //Hand the teardown to the UI thread; never wait on this task from here.
+                                if (Corsair_Commander_Connected)
+                                {
+                                    try { _ = Dispatcher.BeginInvoke(new Action(DisconnectCommanderPro)); }
+                                    catch (Exception ex2) { Debug.WriteLine("pCUE: auto-disconnect dispatch failed: " + ex2.Message); }
+                                }
+                                break;   //stop polling now; cleanup finishes on the UI thread
                             }
                         }
                     }
@@ -472,6 +491,20 @@ namespace pCUE
             try { local.Close(); }
             catch (Exception ex) { Debug.WriteLine("pCUE: HID stream close failed: " + ex.Message); }
             try { local.Dispose(); } catch { }
+        }
+
+        //Single safe teardown for the Commander Pro connection + UI reset. MUST run on the UI
+        //thread. Shared by manual disconnect, connect-failure cleanup and the automatic
+        //disconnect that fires after repeated poll failures. Idempotent and null-safe.
+        private void DisconnectCommanderPro()
+        {
+            Corsair_Commander_Connected = false;
+            StopFanPolling();   //cancellation only - never waits on the poll task
+            CloseHidStream();   //nulls + closes the stream, interrupting any blocked read
+
+            //reset the UI to the disconnected state
+            Open_Corsair_Commander.Content = "Open";
+            foreach (TextBox box in Fan_array) { box.Text = "0000"; }
         }
 
         private string Commander_Pro_READ_FAN_MASK()
@@ -794,30 +827,13 @@ namespace pCUE
             }
                  catch
                 {
-                    Open_Corsair_Commander.Content = "Open";
-                    MessageBox.Show("Cannot open Commander Pro! Is it connected?");  
-                    Corsair_Commander_Connected = false;
-                    StopFanPolling();
-                    CloseHidStream();
-
-                    foreach (TextBox box in Fan_array)
-                    {
-                        box.Text = "0000";
-                    }
-                  
+                    MessageBox.Show("Cannot open Commander Pro! Is it connected?");
+                    DisconnectCommanderPro();   //shared teardown + UI reset
                 }
             }
              else if (Open_Corsair_Commander.Content.ToString() == "Close")
                     {
-                Open_Corsair_Commander.Content = "Open";                      
-                        Corsair_Commander_Connected = false;
-                        StopFanPolling();
-                        CloseHidStream();
-
-                        foreach (TextBox box in Fan_array)
-                        {
-                            box.Text = "0000";
-                        }
+                        DisconnectCommanderPro();   //shared teardown + UI reset
                     }
                 }
 
