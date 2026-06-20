@@ -43,13 +43,15 @@ it** — there is no MSBuild/Visual Studio or attached hardware here.
 | `OpenHardwareMonitorLib.dll` | Hardware sensor access (referenced; `Computer` opened in `MainWindow`) |
 | `GetCoreTempInfoNET.dll` | Reads Core Temp shared memory |
 
-> ⚠️ **Build gotcha:** `pCUE.csproj` references `GetCoreTempInfoNET.dll` and
-> `OpenHardwareMonitorLib.dll` via **absolute `HintPath`s that point outside
-> the repo** (e.g. `..\..\..\Case Tests Project\...`). A fresh clone will not
-> build until those references are repaired to point at the copies in `pCUE/`
-> (the solution bundles `OpenHardwareMonitorLib.dll`) or a local
-> `GetCoreTempInfoNET.dll`. Do not "fix" these to a hard-coded path on someone
-> else's machine — keep them relative if you touch them.
+> ⚠️ **Build gotcha:** the `GetCoreTempInfoNET` and `OpenHardwareMonitorLib`
+> references in `pCUE.csproj` use **relative `HintPath`s into the project
+> folder** (`OpenHardwareMonitorLib.dll`, `GetCoreTempInfoNET.dll`), both marked
+> `<Private>True</Private>` so they copy to the output. `OpenHardwareMonitorLib.dll`
+> **is committed** to `pCUE/`, so it resolves out of the box.
+> `GetCoreTempInfoNET.dll` is **not redistributed in the repo** — drop a copy
+> into `pCUE/` (next to the `.csproj`) before building, or the reference won't
+> resolve. Keep these `HintPath`s relative — do **not** restore an absolute path
+> to one machine.
 
 ## Repository layout
 

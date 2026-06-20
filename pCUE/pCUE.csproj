@@ -77,7 +77,11 @@
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="GetCoreTempInfoNET">
-      <HintPath>..\..\..\Power-Consumption-Monitor-Plus-CPU-with-new-sensors-with-new-GPUZ-method + VSB\GetCoreTempInfoNET.dll</HintPath>
+      <!-- Lives next to the project; drop GetCoreTempInfoNET.dll here (it is not
+           redistributed in the repo). Keep this path relative - do NOT hard-code
+           an absolute path to one machine. -->
+      <HintPath>GetCoreTempInfoNET.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="HidSharp, Version=2.1.0.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\HidSharp.2.1.0\lib\net35\HidSharp.dll</HintPath>
@@ -87,7 +91,9 @@
       <HintPath>..\packages\Dirkster.NumericUpDownLib.2.4.2.2\lib\net40\NumericUpDownLib.dll</HintPath>
     </Reference>
     <Reference Include="OpenHardwareMonitorLib">
-      <HintPath>..\..\..\Case Tests Project\OpenHardwareMonitorLib.dll</HintPath>
+      <!-- Bundled in the project folder and committed to the repo. -->
+      <HintPath>OpenHardwareMonitorLib.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Data" />
