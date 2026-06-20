@@ -76,13 +76,6 @@
     <TargetZone>LocalIntranet</TargetZone>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="GetCoreTempInfoNET">
-      <!-- Lives next to the project; drop GetCoreTempInfoNET.dll here (it is not
-           redistributed in the repo). Keep this path relative - do NOT hard-code
-           an absolute path to one machine. -->
-      <HintPath>GetCoreTempInfoNET.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
     <Reference Include="HidSharp, Version=2.1.0.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\HidSharp.2.1.0\lib\net35\HidSharp.dll</HintPath>
       <Private>True</Private>
@@ -90,9 +83,11 @@
     <Reference Include="NumericUpDownLib, Version=2.4.2.2, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\Dirkster.NumericUpDownLib.2.4.2.2\lib\net40\NumericUpDownLib.dll</HintPath>
     </Reference>
-    <Reference Include="OpenHardwareMonitorLib">
-      <!-- Bundled in the project folder and committed to the repo. -->
-      <HintPath>OpenHardwareMonitorLib.dll</HintPath>
+    <Reference Include="LibreHardwareMonitorLib">
+      <!-- Provides in-process CPU temp/clock/load (replaces Core Temp + GetCoreTempInfoNET).
+           Installed via NuGet (packages.config). If you Install-Package a different version,
+           update the version in this HintPath to match, or let NuGet manage the reference. -->
+      <HintPath>..\packages\LibreHardwareMonitorLib.0.9.4\lib\net472\LibreHardwareMonitorLib.dll</HintPath>
       <Private>True</Private>
     </Reference>
     <Reference Include="System" />

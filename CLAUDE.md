@@ -10,9 +10,8 @@ app that:
 
 - Talks directly to a **Corsair Commander PRO** fan/RGB hub over USB-HID
   (reads fan RPMs, reads/sets fan connection mode, sets fan speed/power).
-- Reads **CPU** temperature, clock and load by launching the bundled
-  **Core Temp** (`Core Temp.exe`) and reading its shared-memory data through
-  `GetCoreTempInfoNET`.
+- Reads **CPU** temperature, clock and load **in-process** via
+  **LibreHardwareMonitorLib** (no external helper process).
 - Tracks live **Min / Max / Average** values for CPU and each fan.
 - Kills Corsair's iCUE background services on connect, because they fight pCUE
   for exclusive HID access to the Commander PRO.
@@ -40,18 +39,25 @@ it** — there is no MSBuild/Visual Studio or attached hardware here.
 | `Dirkster.NumericUpDownLib` 2.4.2.2 | `UIntegerUpDown` fan-speed inputs |
 | `ModernUI.WPF` 1.0.9 | WPF theming |
 | `System.Management` 5.0.0 | WMI queries (`HardwareInfo.cs`) |
-| `OpenHardwareMonitorLib.dll` | Hardware sensor access (referenced; `Computer` opened in `MainWindow`) |
-| `GetCoreTempInfoNET.dll` | Reads Core Temp shared memory |
+| `LibreHardwareMonitorLib` 0.9.4 | In-process CPU temp/clock/load sensors |
 
-> ⚠️ **Build gotcha:** the `GetCoreTempInfoNET` and `OpenHardwareMonitorLib`
-> references in `pCUE.csproj` use **relative `HintPath`s into the project
-> folder** (`OpenHardwareMonitorLib.dll`, `GetCoreTempInfoNET.dll`), both marked
-> `<Private>True</Private>` so they copy to the output. `OpenHardwareMonitorLib.dll`
-> **is committed** to `pCUE/`, so it resolves out of the box.
-> `GetCoreTempInfoNET.dll` is **not redistributed in the repo** — drop a copy
-> into `pCUE/` (next to the `.csproj`) before building, or the reference won't
-> resolve. Keep these `HintPath`s relative — do **not** restore an absolute path
-> to one machine.
+> ⚠️ **Build gotcha — restore LibreHardwareMonitorLib:** the CPU-sensor
+> dependency is `LibreHardwareMonitorLib` (NuGet, listed in `packages.config`,
+> referenced in `pCUE.csproj` with a `HintPath` into `packages\`). A bare
+> `nuget restore` of `packages.config` does **not** pull transitive
+> dependencies, so the most reliable path is to run
+> `Install-Package LibreHardwareMonitorLib` in the Visual Studio Package Manager
+> Console — it reconciles `packages.config`, the `<Reference>`, and the
+> transitive deps (e.g. `System.IO.Ports`) in one step. If you install a version
+> other than 0.9.4, update the version in the `HintPath` to match (or let NuGet
+> manage the reference). LibreHardwareMonitor needs the app's **admin rights**
+> (already requested in `app.manifest`) for full CPU sensor access.
+>
+> The old `Core Temp` + `GetCoreTempInfoNET` and the `OpenHardwareMonitorLib.dll`
+> reference were removed in the migration. `OpenHardwareMonitorLib.dll`,
+> `Core Temp.exe`, `CoreTemp.ini`, `CoreTempSharedMemory.cs` and `Changes.txt`
+> are still committed but are now **dead weight** (nothing references them) and
+> can be deleted.
 
 ## Repository layout
 
@@ -70,10 +76,10 @@ pCUE/
   App.config                     Runtime config + persisted user settings
   app.manifest                   Requires elevation / DPI awareness
   small.ico                      App icon
-  Core Temp.exe + CoreTemp.ini   Bundled third-party Core Temp tool
-  OpenHardwareMonitorLib.dll     Bundled sensor library
   packages.config                NuGet dependencies
-  Changes.txt                    Core Temp's changelog (THIRD PARTY, not pCUE's)
+  Core Temp.exe + CoreTemp.ini   Bundled third-party Core Temp tool (NOW UNUSED)
+  OpenHardwareMonitorLib.dll     Old sensor library (NOW UNUSED, dereferenced)
+  Changes.txt                    Core Temp's changelog (THIRD PARTY, NOW UNUSED)
   Readme.txt / License.txt / Tips.txt   Core Temp docs + scratch notes
 ```
 
@@ -95,7 +101,8 @@ The compiled C# is exactly: `App.xaml.cs`, `MainWindow.xaml.cs`,
 
 Almost all behaviour lives in **`MainWindow.xaml.cs`**, organized with
 `#region` blocks: *Main Window Functions*, *Commander Pro Functions*,
-*For CoreTemp*, *App Kill functions*. When adding logic, follow that regioning.
+*CPU sensors (LibreHardwareMonitor)*, *App Kill functions*. When adding logic,
+follow that regioning.
 
 ### Commander PRO HID access (read this before touching fan code)
 
@@ -121,13 +128,22 @@ Almost all behaviour lives in **`MainWindow.xaml.cs`**, organized with
   a value **≤ 100 is treated as a power percentage**, a value **> 100 as an RPM
   target**. Preserve this when editing fan-set logic.
 
-### CPU data via Core Temp
+### CPU data via LibreHardwareMonitor
 
-- "Start" launches `Core Temp.exe -minimized`, then reads shared memory through
-  a `CoreTempInfo` instance polled by a `System.Windows.Forms.Timer` (500 ms).
-- Closing pCUE (or pressing Stop) **kills the Core Temp process** via
-  `Kill_Function` / `ForceKill` (which escalates `Process.Kill` → `taskkill`
-  → `wmic`). The bundled `Core Temp.exe` must ship next to `pCUE.exe`.
+- A single `Computer { IsCpuEnabled = true }` is opened once in the constructor
+  and closed in `Window_Closed`.
+- `CpuSensorTimer` (`System.Windows.Forms.Timer`, 500 ms) drives
+  `CpuSensorTimer_Tick`. The "Start"/"Stop" button just starts/stops that timer
+  — there is **no external process** to launch or kill anymore.
+- Each tick refreshes the sensor tree via `thisComputer.Accept(_updateVisitor)`
+  (LibreHardwareMonitor only updates `ISensor.Value` on `Update`/`Accept`), then
+  picks: a whole-CPU **temperature** (sensor name containing `Package` / `Average`
+  / `Tctl`, else the average of the per-`Core` temps), the average per-core
+  **clock** (MHz), and the `CPU Total` **load** (%). It writes `CPU_array[0/3/6]`.
+- **Number formatting is intentionally left at the current culture** (not
+  `cultureUS`) here, so the value round-trips through `Set_min_max`'s
+  `Convert.ToDouble` (which also uses the current culture). Don't "fix" this to
+  `cultureUS` without also changing the parse side.
 
 ### Min / Max / Average
 
@@ -179,9 +195,10 @@ msbuild pCUE.sln /p:Configuration=Release   # bumps file-version revision
 msbuild pCUE.sln /p:Configuration=Debug
 ```
 
-Running requires: a real **Corsair Commander PRO** attached for fan features,
-**administrator rights** (the app manifest requests elevation and the app kills
-iCUE services), and the bundled `Core Temp.exe` alongside the executable.
+Running requires: a real **Corsair Commander PRO** attached for fan features and
+**administrator rights** (the app manifest requests elevation; needed both to
+kill iCUE services and for LibreHardwareMonitor's CPU sensors). No external
+helper executable is needed anymore.
 
 There are **no automated tests, linters, or CI** in this repository. "Verifying"
 a change here means a Windows build + manual hardware test; state plainly that
@@ -204,7 +221,8 @@ you could not build/run when working in the Linux sandbox.
   region; respect `hidLock` and the background poll model.
 - **New Corsair command** → add the opcode to
   `CorsairLightingProtocolConstants.cs`, then a locked read/write helper.
-- **CPU/sensor info** → `HardwareInfo.cs` (WMI) or the Core Temp region.
+- **CPU/sensor info** → `HardwareInfo.cs` (WMI) or the *CPU sensors
+  (LibreHardwareMonitor)* region (`CpuSensorTimer_Tick` + `UpdateVisitor`).
 - **UI layout/labels** → `MainWindow.xaml`; remember the `ed1..ed33` index
   coupling described above.
 - **Release/versioning** → `Properties/AssemblyInfo.cs` + the MSBuild bump task
