@@ -53,11 +53,10 @@ it** — there is no MSBuild/Visual Studio or attached hardware here.
 > manage the reference). LibreHardwareMonitor needs the app's **admin rights**
 > (already requested in `app.manifest`) for full CPU sensor access.
 >
-> The old `Core Temp` + `GetCoreTempInfoNET` and the `OpenHardwareMonitorLib.dll`
-> reference were removed in the migration. `OpenHardwareMonitorLib.dll`,
-> `Core Temp.exe`, `CoreTemp.ini`, `CoreTempSharedMemory.cs` and `Changes.txt`
-> are still committed but are now **dead weight** (nothing references them) and
-> can be deleted.
+> The old `Core Temp` + `GetCoreTempInfoNET` and `OpenHardwareMonitorLib.dll`
+> were removed in the migration; the now-dead files (`Core Temp.exe`,
+> `CoreTemp.ini`, `OpenHardwareMonitorLib.dll`, `CoreTempSharedMemory.cs` and
+> `Changes.txt`) have been **deleted** from the repo.
 
 ## Repository layout
 
@@ -77,10 +76,7 @@ pCUE/
   app.manifest                   Requires elevation / DPI awareness
   small.ico                      App icon
   packages.config                NuGet dependencies
-  Core Temp.exe + CoreTemp.ini   Bundled third-party Core Temp tool (NOW UNUSED)
-  OpenHardwareMonitorLib.dll     Old sensor library (NOW UNUSED, dereferenced)
-  Changes.txt                    Core Temp's changelog (THIRD PARTY, NOW UNUSED)
-  Readme.txt / License.txt / Tips.txt   Core Temp docs + scratch notes
+  Readme.txt / License.txt / Tips.txt   Leftover Core Temp docs + scratch notes
 ```
 
 ### Files that are present but NOT compiled
@@ -89,8 +85,6 @@ These are in the folder but **not** in the `.csproj` `<Compile>` list, so they
 are dead/reference code. Do not assume changes to them affect the build:
 
 - `ScreenCapture.cs` (namespace `Case_Tester`)
-- `CoreTempSharedMemory.cs` (namespace `Case_Tester`, references Syncfusion — a
-  decompiled/reference stub, not buildable as-is)
 - `MessageBoxEx.cs` (namespace `System.Windows.Forms`)
 
 The compiled C# is exactly: `App.xaml.cs`, `MainWindow.xaml.cs`,
