@@ -3,12 +3,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using OpenHardwareMonitor.Hardware;
+using LibreHardwareMonitor.Hardware;
 using System.Diagnostics;
 using Microsoft.Win32;
 using System.Threading;
 using System.Threading.Tasks;
-using GetCoreTempInfoNET;
 
 //struct ResultsStruct
 //{
@@ -96,23 +95,20 @@ namespace pCUE
         int vddc = 13;
         int cpu_temperature = 14;
 
-        //CoreTemp          
-        static CoreTempInfo CTInfo;
-        static System.Timers.Timer RefreshInfo;
-        static Process CoreTemp = new Process();
-
         //fan constants
         public const int FAN_FORCE_THREE_PIN_MODE_ON = 0x01;
         public const int FAN_FORCE_THREE_PIN_MODE_OFF = 0x00;
         public const int FAN_CURVE_POINTS_NUM = 6;
         public const int FAN_CURVE_TEMP_GROUP_EXTERNAL = 255;
 
-        //Gia to open Hardware
+        //CPU monitoring via LibreHardwareMonitor (replaces Core Temp). Opened once at startup;
+        //the CPU-data timer polls its sensors for temperature, clock and load.
         Computer thisComputer;
+        readonly UpdateVisitor lhmUpdateVisitor = new UpdateVisitor();
 
 
         //Timer for CPU Data
-        static System.Windows.Forms.Timer CoreTempTimer = new System.Windows.Forms.Timer();
+        static System.Windows.Forms.Timer CpuDataTimer = new System.Windows.Forms.Timer();
 
         //Timer for min-max-avg values
         static System.Windows.Forms.Timer Set_Min_Max_AVG_timer = new System.Windows.Forms.Timer();
@@ -165,8 +161,8 @@ namespace pCUE
             InitializeComponent();
 
             //Read CPU Data
-            CoreTempTimer.Tick += new EventHandler(CoreTempTimer_Tick);
-            CoreTempTimer.Interval = 500; // specify interval time
+            CpuDataTimer.Tick += new EventHandler(CpuDataTimer_Tick);
+            CpuDataTimer.Interval = 500; // specify interval time
 
             //Fan RPMs are now polled on a background task (StartFanPolling), not a UI timer.
 
@@ -179,9 +175,11 @@ namespace pCUE
             Set_Min_Max_AVG_timer.Interval = 500; // specify interval time as you want  
             Set_Min_Max_AVG_timer.Start();
  
-            // For OpenHardware
-            thisComputer = new Computer() { CPUEnabled = true, GPUEnabled = true, HDDEnabled = true, RAMEnabled = true, FanControllerEnabled = true };
-            thisComputer.Open();
+            // CPU sensors via LibreHardwareMonitor (CPU only - that is all pCUE displays).
+            // Requires admin rights, which the app manifest already requests.
+            thisComputer = new Computer() { IsCpuEnabled = true };
+            try { thisComputer.Open(); }
+            catch (Exception ex) { Debug.WriteLine("pCUE: LibreHardwareMonitor open failed: " + ex.Message); }
         }
 
         #region Main Window Functions
@@ -211,15 +209,16 @@ namespace pCUE
 
         private void Window_Closed(object sender, EventArgs e)
         {
-            CoreTempTimer.Stop();
+            CpuDataTimer.Stop();
 
             //stop background fan polling and release the HID stream
             Corsair_Commander_Connected = false;
             StopFanPolling();
             CloseHidStream();
 
-            //if pCUE closes kill Core Temp
-            Kill_Function("Core Temp");
+            //release the LibreHardwareMonitor session (unloads its kernel driver)
+            try { thisComputer?.Close(); }
+            catch (Exception ex) { Debug.WriteLine("pCUE: LibreHardwareMonitor close failed: " + ex.Message); }
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -232,7 +231,7 @@ namespace pCUE
 
             else
             {
-                CoreTempTimer.Stop();
+                CpuDataTimer.Stop();
             }
         }
         #endregion
@@ -853,71 +852,77 @@ namespace pCUE
 
         #endregion
 
-        #region For CoreTemp
-        public void CTInfo_ReportError(ErrorCodes ErrCode, string ErrMsg)
+        #region CPU data (LibreHardwareMonitor)
+        //Walks the LibreHardwareMonitor tree and refreshes every hardware/sensor reading in one pass.
+        private class UpdateVisitor : IVisitor
         {
-            CoreTempTimer.Stop();
-            Start_CPU_data.Content = "Start";
-            MessageBox.Show(ErrMsg);
+            public void VisitComputer(IComputer computer) { computer.Traverse(this); }
+            public void VisitHardware(IHardware hardware)
+            {
+                hardware.Update();
+                foreach (IHardware sub in hardware.SubHardware) sub.Accept(this);
+            }
+            public void VisitSensor(ISensor sensor) { }
+            public void VisitParameter(IParameter parameter) { }
         }
 
-        private void CoreTempTimer_Tick(object sender, EventArgs e)
+        private void CpuDataTimer_Tick(object sender, EventArgs e)
         {
-            //Attempt to read shared memory.
-            bool bReadSuccess = CTInfo.GetData();
+            if (thisComputer == null) return;
 
-            double Temperature = 0;
-            double Load = 0;
-
-            //If read was successful the post the new info on the console.
-            if (bReadSuccess)
+            try
             {
-                uint index;
-                char TempType;
+                //Refresh all CPU sensor values for this pass.
+                thisComputer.Accept(lhmUpdateVisitor);
 
-                //if (CTInfo.IsFahrenheit)
-                //{
-                //    label97.Text = "CPU Temp (°F)";
-                //}
-                //else
-                //{
-                //    label97.Text = "CPU Temp (°C)";
-                //}
+                double tempSum = 0; int tempCount = 0;   // per-core temps, used only if no package/average sensor exists
+                double clockSum = 0; int clockCount = 0; // per-core clocks, averaged into a single figure
+                double? coreAvgTemp = null;              // "Core Average", if the CPU exposes it
+                double? packageTemp = null;              // "CPU Package" / "Core (Tctl/Tdie)"
+                double? totalLoad = null;                // "CPU Total"
 
-                //Console.WriteLine("CPU Name: " + CTInfo.GetCPUName);
-                //Console.WriteLine("CPU Speed: " + CTInfo.GetCPUSpeed + "MHz (" + CTInfo.GetFSBSpeed + " x " + CTInfo.GetMultiplier + ")");
-                //Console.WriteLine("CPU VID: " + CTInfo.GetVID + "v");
-                //Console.WriteLine("Physical CPUs: " + CTInfo.GetCPUCount);
-                //Console.WriteLine("Cores per CPU: " + CTInfo.GetCoreCount);              
-
-                for (uint i = 0; i < CTInfo.GetCPUCount; i++)
+                foreach (IHardware hw in thisComputer.Hardware)
                 {
-                    for (uint g = 0; g < CTInfo.GetCoreCount; g++)
-                    {
-                        index = g + (i * CTInfo.GetCoreCount);
+                    if (hw.HardwareType != HardwareType.Cpu) continue;
 
-                        Temperature += CTInfo.GetTemp[index];
-                        Load += CTInfo.GetCoreLoad[index];
+                    foreach (ISensor s in hw.Sensors)
+                    {
+                        if (!s.Value.HasValue) continue;
+                        double v = s.Value.Value;
+
+                        switch (s.SensorType)
+                        {
+                            case SensorType.Temperature:
+                                if (s.Name == "Core Average") coreAvgTemp = v;
+                                else if (s.Name == "CPU Package" || s.Name == "Core (Tctl/Tdie)") packageTemp = v;
+                                else if (s.Name.StartsWith("CPU Core #") || s.Name.StartsWith("Core #"))
+                                { tempSum += v; tempCount++; }
+                                break;
+
+                            case SensorType.Clock:
+                                if (s.Name.StartsWith("CPU Core #") || s.Name.StartsWith("Core #"))
+                                { clockSum += v; clockCount++; }
+                                break;
+
+                            case SensorType.Load:
+                                if (s.Name == "CPU Total") totalLoad = v;
+                                break;
+                        }
                     }
                 }
 
-                double AVGTemperature = Temperature / (CTInfo.GetCoreCount * CTInfo.GetCPUCount);
+                //Prefer the chip's own average/package temperature; otherwise average the per-core readings.
+                double temperature = coreAvgTemp ?? packageTemp ?? (tempCount > 0 ? tempSum / tempCount : 0.0);
+                double clock = clockCount > 0 ? clockSum / clockCount : 0.0;
+                double load = totalLoad ?? 0.0;
 
-                double AVGLoad = Load / (CTInfo.GetCoreCount * CTInfo.GetCPUCount);
-
-                double VID = CTInfo.GetVID;
-
-                CPU_array[0].Text = AVGTemperature.ToString("0.0");
-                CPU_array[3].Text = CTInfo.GetCPUSpeed.ToString("N1");
-                CPU_array[6].Text = AVGLoad.ToString("N1");
+                CPU_array[0].Text = temperature.ToString("0.0");
+                CPU_array[3].Text = clock.ToString("N1");
+                CPU_array[6].Text = load.ToString("N1");
             }
-
-            else
+            catch (Exception ex)
             {
-                //CoreTempTimer.Stop();
-                //CoreTemp_timer_min_max.Stop();
-                //MessageBox.Show("Internal error name: " + CTInfo.GetLastError + "Internal error name: " + CTInfo.GetLastError + "Internal error message: " + CTInfo.GetErrorMessage(CTInfo.GetLastError));               
-                //Start_CPU_data.Text = "Start";
+                Debug.WriteLine("pCUE: CPU sensor read failed: " + ex.Message);
             }
         }
         #endregion
@@ -1375,40 +1380,23 @@ namespace pCUE
                 try
                 {
                     Start_CPU_data.Content = "Stop";
-                   
-                    //Start Core Temp
-                    CoreTemp.StartInfo.FileName = @"Core Temp.exe";
-                    CoreTemp.StartInfo.Arguments = "-minimized";
-                    CoreTemp.Start();
 
-                    Thread.Sleep(500);
-
-                    //Initiate CoreTempInfo class.
-                    CTInfo = new CoreTempInfo();
-
-                    //Sign up for an event reporting errors
-                    CTInfo.ReportError += new ErrorOccured(CTInfo_ReportError);
-
-                    //Start to get readings from Core Temp
-                    CoreTempTimer.Start();                   
+                    //LibreHardwareMonitor is opened at startup; just begin polling its CPU sensors.
+                    CpuDataTimer.Start();
                 }
-                catch
+                catch (Exception ex)
                 {
-                    CoreTempTimer.Stop();
+                    CpuDataTimer.Stop();
                     Start_CPU_data.Content = "Start";
-
-                    Kill_Function("Core Temp");                  
+                    Debug.WriteLine("pCUE: could not start CPU monitoring: " + ex.Message);
                 }
-
-
             }
             else if (Start_CPU_data.Content.ToString() == "Stop")
             {
                 Start_CPU_data.Content = "Start";
-                Kill_Function("Core Temp");
-                CoreTempTimer.Stop();             
+                CpuDataTimer.Stop();
             }
-        }       
+        }
 
     }  
 }

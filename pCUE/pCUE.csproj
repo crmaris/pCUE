@@ -76,8 +76,9 @@
     <TargetZone>LocalIntranet</TargetZone>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="GetCoreTempInfoNET">
-      <HintPath>..\..\..\Power-Consumption-Monitor-Plus-CPU-with-new-sensors-with-new-GPUZ-method + VSB\GetCoreTempInfoNET.dll</HintPath>
+    <Reference Include="LibreHardwareMonitorLib, Version=0.9.4.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\LibreHardwareMonitorLib.0.9.4\lib\net472\LibreHardwareMonitorLib.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="HidSharp, Version=2.1.0.0, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\HidSharp.2.1.0\lib\net35\HidSharp.dll</HintPath>
@@ -85,9 +86,6 @@
     </Reference>
     <Reference Include="NumericUpDownLib, Version=2.4.2.2, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\Dirkster.NumericUpDownLib.2.4.2.2\lib\net40\NumericUpDownLib.dll</HintPath>
-    </Reference>
-    <Reference Include="OpenHardwareMonitorLib">
-      <HintPath>..\..\..\Case Tests Project\OpenHardwareMonitorLib.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Data" />
