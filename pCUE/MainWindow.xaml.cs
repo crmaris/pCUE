@@ -877,6 +877,7 @@ namespace pCUE
 
                 double tempSum = 0; int tempCount = 0;   // per-core temps, used only if no package/average sensor exists
                 double clockSum = 0; int clockCount = 0; // per-core clocks, averaged into a single figure
+                double? coreAvgClk = null;               // "Cores (Average)" package-level clock, if exposed (preferred)
                 double? coreAvgTemp = null;              // "Core Average", if the CPU exposes it
                 double? packageTemp = null;              // "CPU Package" / "Core (Tctl/Tdie)"
                 double? totalLoad = null;                // "CPU Total"
@@ -900,7 +901,15 @@ namespace pCUE
                                 break;
 
                             case SensorType.Clock:
-                                if (s.Name.StartsWith("CPU Core #") || s.Name.StartsWith("Core #"))
+                                // Prefer the chip's package-level "Cores (Average)"; otherwise average
+                                // the real per-core clocks. "Core #N (Effective)" also starts with
+                                // "Core #"; excluding it keeps the average to the nominal per-core
+                                // clocks (effective variants read low at partial load and would drag
+                                // the reported speed down).
+                                if (s.Name == "Cores (Average)")
+                                    coreAvgClk = v;
+                                else if ((s.Name.StartsWith("CPU Core #") || s.Name.StartsWith("Core #"))
+                                    && !s.Name.Contains("Effective"))
                                 { clockSum += v; clockCount++; }
                                 break;
 
@@ -913,7 +922,7 @@ namespace pCUE
 
                 //Prefer the chip's own average/package temperature; otherwise average the per-core readings.
                 double temperature = coreAvgTemp ?? packageTemp ?? (tempCount > 0 ? tempSum / tempCount : 0.0);
-                double clock = clockCount > 0 ? clockSum / clockCount : 0.0;
+                double clock = coreAvgClk ?? (clockCount > 0 ? clockSum / clockCount : 0.0);
                 double load = totalLoad ?? 0.0;
 
                 CPU_array[0].Text = temperature.ToString("0.0");
