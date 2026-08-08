@@ -118,5 +118,17 @@ namespace pCUE.Properties {
                 this["Debug_Logging"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool Auto_Connect {
+            get {
+                return ((bool)(this["Auto_Connect"]));
+            }
+            set {
+                this["Auto_Connect"] = value;
+            }
+        }
     }
 }

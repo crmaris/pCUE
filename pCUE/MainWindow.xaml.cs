@@ -248,6 +248,30 @@ namespace pCUE
 
             StartRemoteControlIfRequested();
 
+            //Opt-in auto-connect. Deliberately NOT the default: opening the Commander also kills
+            //the iCUE services, which would be a rude thing to do unasked on every launch. It earns
+            //its place on a test bench, where an auto-update restart otherwise leaves the hardware
+            //disconnected until somebody walks over and clicks two buttons.
+            Auto_Connect_CheckBox.IsChecked = Properties.Settings.Default.Auto_Connect;
+            if (Properties.Settings.Default.Auto_Connect)
+            {
+                //After the window is up, so a failure dialog cannot block loading.
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    try
+                    {
+                        AppLog.Info("Auto-connect: opening Commander PRO and tachometer.");
+                        if (!Corsair_Commander_Connected) Open_Corsair_Commander_Click(this, null);
+                        if (bench_tach != null && !bench_tach.IsConnected) bench_tach.Connect();
+                    }
+                    catch (Exception ex)
+                    {
+                        //A missing tachometer is normal, so log it rather than nagging on start-up.
+                        AppLog.Warn("Auto-connect: " + ex.Message);
+                    }
+                }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            }
+
             //Optional start-up update check. It only reports into the status line - it never
             //pops a dialog and never installs anything by itself.
             Update_On_Start_CheckBox.IsChecked = Properties.Settings.Default.Update_Check_On_Start;
@@ -1852,6 +1876,12 @@ namespace pCUE
             Properties.Settings.Default.Save();
 
             ApplyRemoteControlState();
+        }
+
+        private void Auto_Connect_Changed(object sender, RoutedEventArgs e)
+        {
+            Properties.Settings.Default.Auto_Connect = Auto_Connect_CheckBox.IsChecked == true;
+            Properties.Settings.Default.Save();
         }
 
         private void Debug_Log_Changed(object sender, RoutedEventArgs e)

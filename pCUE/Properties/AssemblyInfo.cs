@@ -58,4 +58,4 @@ using System.Windows;
 // version below, in +0.1 steps: 1.3.1 -> 1.3.2 -> 1.3.3 ... Keep it THREE components;
 // the bump task will not touch a four-part value.
 [assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.3.8")]
+[assembly: AssemblyFileVersion("1.3.9")]

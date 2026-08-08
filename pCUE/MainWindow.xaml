@@ -140,7 +140,7 @@
         <GroupBox x:Name="Tach_Box" Header="Bench Tachometer + closed-loop RPM hold (for fans the Commander cannot regulate by RPM)" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,412,0,0" Height="104" Width="594" Grid.ColumnSpan="2">
             <Grid x:Name="Tach_Grid" HorizontalAlignment="Left" VerticalAlignment="Top" Height="84" Width="584">
                 <Button x:Name="Tach_Connect_Button" Content="Connect Tach" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6,10,0,0" Width="96" Height="24" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Tach_Connect_Button_Click"/>
-                <Label Content="Fan:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="112,9,0,0" Height="25"/>
+                <Label Content="Fan:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="108,9,0,0" Height="25"/>
                 <ComboBox x:Name="Tach_Fan_Assign" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="152,11,0,0" Width="76" ToolTip="The fan this panel works on: the tachometer supplies its RPM, and the RPM hold drives it." SelectionChanged="Tach_Fan_Assign_SelectionChanged">
                     <ComboBoxItem Content="None" IsSelected="True"/>
                     <ComboBoxItem Content="Fan #1"/>
@@ -150,17 +150,18 @@
                     <ComboBoxItem Content="Fan #5"/>
                     <ComboBoxItem Content="Fan #6"/>
                 </ComboBox>
-                <Label Content="RPM:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="252,9,0,0" Height="25"/>
-                <TextBlock x:Name="Tach_RPM_Readout" Text="----" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="296,12,0,0" Width="60" FontWeight="Bold" Foreground="White"/>
-                <Label Content="Status:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="358,9,0,0" Height="25"/>
-                <TextBlock x:Name="Tach_Status_Label" Text="● Disconnected" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="410,12,0,0" Width="110" FontWeight="Bold" Foreground="#FFE0E5C8"/>
-                <TextBlock x:Name="Tach_Battery_Label" Text="BATT LOW" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="492,12,0,0" Width="80" FontWeight="Bold" Foreground="Yellow" Visibility="Collapsed"/>
+                <Label Content="RPM:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="220,9,0,0" Height="25"/>
+                <TextBlock x:Name="Tach_RPM_Readout" Text="----" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="262,12,0,0" Width="52" FontWeight="Bold" Foreground="White"/>
+                <Label Content="Status:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="316,9,0,0" Height="25"/>
+                <TextBlock x:Name="Tach_Status_Label" Text="● Disconnected" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="366,12,0,0" Width="104" FontWeight="Bold" Foreground="#FFE0E5C8"/>
+                <TextBlock x:Name="Tach_Battery_Label" Text="BATT LOW" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="478,12,0,0" Width="78" FontWeight="Bold" Foreground="Yellow" Visibility="Collapsed"/>
 
                 <Label Content="Hold this fan at" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6,42,0,0" Height="25"/>
                 <NumericUpDownLib:UIntegerUpDown x:Name="Hold_Target_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" IsReadOnly="False" MinValue="0" MaxValue="3500" Value="800" ClipToBounds="True" Height="23" Margin="112,44,0,0" NumberStyle="Integer" ValueChanged="Hold_Target_ValueChanged"/>
                 <Label Content="RPM" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="180,42,0,0" Height="25"/>
                 <Button x:Name="Hold_Start_Button" Content="Hold RPM" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="222,44,0,0" Width="78" Height="23" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Hold_Start_Button_Click"/>
-                <TextBlock x:Name="Hold_Status_Label" Text="" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="308,47,0,0" Width="272" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="White"/>
+                <TextBlock x:Name="Hold_Status_Label" Text="" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="308,47,0,0" Width="164" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="White"/>
+                <CheckBox x:Name="Auto_Connect_CheckBox" Content="Auto connect" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="478,48,0,0" Foreground="#FFF5EFEF" ToolTip="Open the Commander PRO and the tachometer automatically when pCUE starts. Note this also kills the iCUE services, exactly as the Open button does." Checked="Auto_Connect_Changed" Unchecked="Auto_Connect_Changed"/>
             </Grid>
         </GroupBox>
         <Button x:Name="Update_Check_Button" Content="Check for Updates" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="23,524,0,0" Width="120" Height="24" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Update_Check_Button_Click"/>
