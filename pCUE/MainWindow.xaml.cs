@@ -163,6 +163,11 @@ namespace pCUE
         volatile int tachAssignedChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
         //So the low-battery dialog appears once per connection instead of every 500 ms tick.
         bool tachBatteryWarned = false;
+        //Latched copy of the meter's low-battery flag. The flag itself flickers - on the bench it
+        //reported LOW at 14:18 and clear again minutes later on the same cell - so following it
+        //directly makes the label blink on and off, which is how the first real low battery went
+        //unnoticed. Cleared when the meter disconnects, which is what changing the cell does.
+        bool tachBatteryLowSeen = false;
 
         //Latest RPM per channel as shown in the Current column, i.e. AFTER the bench-tachometer
         //override. The closed-loop RPM hold feeds on this, so it automatically uses the external
@@ -2306,6 +2311,8 @@ namespace pCUE
                 Tach_RPM_Readout.Text = "----";
                 Tach_Battery_Label.Visibility = Visibility.Collapsed;
                 tachBatteryWarned = false;      //re-arm the warning for the next session
+                tachBatteryLowSeen = false;     //changing the cell power-cycles the meter, so this
+                                                //is exactly where a fresh battery clears the label
                 return;
             }
 
@@ -2326,7 +2333,8 @@ namespace pCUE
             //reading is fresh. Tying it to a fresh reading hid the warning in exactly the case
             //that matters: a battery flat enough to stop the meter sending frames.
             bool low = bench_tach.BatteryLow;
-            Tach_Battery_Label.Visibility = low ? Visibility.Visible : Visibility.Collapsed;
+            if (low) tachBatteryLowSeen = true;
+            Tach_Battery_Label.Visibility = tachBatteryLowSeen ? Visibility.Visible : Visibility.Collapsed;
 
             if (low && !tachBatteryWarned)
             {
@@ -2345,10 +2353,9 @@ namespace pCUE
                         "pCUE - tachometer battery low", MessageBoxButton.OK, MessageBoxImage.Warning);
                 }));
             }
-            else if (!low)
-            {
-                tachBatteryWarned = false;      //fresh cells - arm it again
-            }
+            //Deliberately NOT re-armed when the flag merely goes clear again. It flickers, and
+            //re-arming on every dip would fire the modal dialog over and over on one tired cell.
+            //Disconnecting the meter re-arms it, so fresh cells still get a fresh warning.
         }
 
         //Connection state -> update the button caption and status line.
