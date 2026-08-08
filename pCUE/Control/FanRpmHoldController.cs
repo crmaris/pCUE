@@ -48,6 +48,12 @@ namespace pCUE
         public int MinDuty { get; set; } = 0;
         public int MaxDuty { get; set; } = 100;
         public int StartDuty { get; set; } = 40;
+        /// <summary>
+        /// True when StartDuty is the duty the fan is ALREADY running at. There is then nothing to
+        /// settle, so the loop can measure immediately instead of burning SettleDelayMs first -
+        /// which is most of the perceived lag when nudging a target by a small amount.
+        /// </summary>
+        public bool StartDutyIsCurrent { get; set; } = false;
 
         public int CoarseDutyStep { get; set; } = 5;
         public int FineDutyStep { get; set; } = 1;
@@ -194,7 +200,14 @@ namespace pCUE
                 // first error is computed from the OLD duty and the loop confidently corrects in the
                 // wrong direction. (Seen on the bench: starting a 1100 RPM hold from a fan running
                 // at ~1400 walked the duty DOWN to 911 RPM.)
-                if (!await Delay(cfg.SettleDelayMs, ct)) { stopReason = "stopped before settling"; }
+                if (cfg.StartDutyIsCurrent)
+                {
+                    // The fan is already running at this duty and has been for a while, so there is
+                    // nothing to settle and nothing stale to discard. Waiting anyway is pure lag on
+                    // the most common case there is: nudging the target by a little.
+                    AppLog.Info("HOLD starting from the fan's current duty - no settle wait needed");
+                }
+                else if (!await Delay(cfg.SettleDelayMs, ct)) { stopReason = "stopped before settling"; }
                 else { samples.Clear(); }
 
                 var overall = Stopwatch.StartNew();

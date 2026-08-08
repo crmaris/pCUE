@@ -180,6 +180,16 @@ namespace pCUE
         //on a 3-pin (DC) channel it offers fixed percent only, so pCUE closes that loop itself.
         FanRpmHoldController rpmHold;
         volatile int holdChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
+
+        //Duty pCUE last commanded per channel, -1 if none this session. The RPM hold starts from
+        //this rather than a fixed percentage, so a small target change stays a small move.
+        //Tracked rather than read back over HID: every duty in this app goes through
+        //Commander_Pro_Set_Fan_Power, whereas the READ_FAN_POWER path has never been exercised.
+        readonly int[] lastCommandedDuty = new int[6] { -1, -1, -1, -1, -1, -1 };
+
+        //What to open at when the fan is stopped: there is nothing to measure, and nothing to
+        //step away from, until it breaks away.
+        const int HoldKickStartDuty = 40;
         //Live tunables for the hold loop, editable over the remote API so the controller can be
         //tuned against real hardware without rebuilding and redeploying the app.
         readonly FanHoldConfig holdConfig = new FanHoldConfig();
@@ -891,6 +901,7 @@ namespace pCUE
                     stream.Write(outbuf);
                     stream.Read(inbuf);
                     LogHidExchange("WRITE_FAN_POWER fan=" + (fan_channel + 1) + " duty=" + fan_power + "%", 4);
+                    if (fan_channel >= 0 && fan_channel <= 5) lastCommandedDuty[fan_channel] = fan_power;
                 }
             }
         }
@@ -2071,6 +2082,22 @@ namespace pCUE
                               " - connect the tachometer and point it at this fan.", UpdateAlertBrush);
                 holdChannel = -1;
                 return;
+            }
+
+            //Start from the duty the fan is ALREADY running at. With a fixed 40% start, asking for
+            //400 RPM while the fan sat at 350 first threw it up past 1100 RPM and then needed about
+            //seven coarse steps to walk back down - roughly half a minute of travel for a 50 RPM
+            //change. Starting where the fan is makes a small change a couple of 1% steps.
+            int knownDuty = lastCommandedDuty[channel];
+            if (ReadHeldFanRpm() != null && knownDuty > 0)
+            {
+                holdConfig.StartDuty = knownDuty;
+                holdConfig.StartDutyIsCurrent = true;
+            }
+            else
+            {
+                holdConfig.StartDuty = HoldKickStartDuty;
+                holdConfig.StartDutyIsCurrent = false;
             }
 
             holdConfig.TargetRpm = targetRpm;
