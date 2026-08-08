@@ -1610,7 +1610,7 @@ namespace pCUE
             Dispatcher.Invoke(new Action(delegate
             {
                 if (rpmHold != null && rpmHold.IsRunning) { result = "A hold is already running; stop it first."; return; }
-                Hold_Fan_Select.SelectedIndex = fan;          // index 0 is "None"
+                Tach_Fan_Assign.SelectedIndex = fan;          // index 0 is "None"
                 Hold_Target_Numeric.Value = (uint)rpm;
                 Hold_Start_Button_Click(this, null);
                 //The click handler reports its own reason (no feedback, not connected, ...).
@@ -1917,10 +1917,13 @@ namespace pCUE
                 return;
             }
 
-            int sel = Hold_Fan_Select.SelectedIndex;
+            //One selector for the whole panel: the fan the tachometer reads is the fan we hold.
+            //Two separate dropdowns had to agree for the loop to have any feedback, and nothing
+            //enforced that - an easy way to start a loop that could never converge.
+            int sel = Tach_Fan_Assign.SelectedIndex;
             if (sel < 1 || sel > 6)
             {
-                SetHoldStatus("Pick a fan to hold first.", UpdateAlertBrush);
+                SetHoldStatus("Pick a fan first.", UpdateAlertBrush);
                 return;
             }
             if (!Corsair_Commander_Connected)
