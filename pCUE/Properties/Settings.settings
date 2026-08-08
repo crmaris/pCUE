@@ -14,5 +14,17 @@
     <Setting Name="Update_Manifest_Url" Type="System.String" Scope="User">
       <Value Profile="(Default)" />
     </Setting>
+    <Setting Name="Remote_Enabled" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
+    <Setting Name="Remote_Port" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">5056</Value>
+    </Setting>
+    <Setting Name="Remote_Token" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="Debug_Logging" Type="System.Boolean" Scope="User">
+      <Value Profile="(Default)">False</Value>
+    </Setting>
   </Settings>
 </SettingsFile>

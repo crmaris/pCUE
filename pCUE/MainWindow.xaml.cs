@@ -1680,52 +1680,150 @@ namespace pCUE
         //   pCUE.exe --debug            (verbose log + log file)
         private void StartRemoteControlIfRequested()
         {
-            string[] args = Environment.GetCommandLineArgs();
-            bool enable = false, debug = false;
-            string prefix = null, token = null;
+            bool debug = false;
 
-            foreach (string raw in args)
+            //Command-line flags are still honoured (handy for a one-off run), but the normal way to
+            //turn remote control on is the Remote checkbox in the UI, which persists.
+            foreach (string raw in Environment.GetCommandLineArgs())
             {
                 string a = raw.Trim();
-                if (a.Equals("--remote", StringComparison.OrdinalIgnoreCase)) enable = true;
-                else if (a.Equals("--debug", StringComparison.OrdinalIgnoreCase)) debug = true;
-                else if (a.StartsWith("--remote-prefix=", StringComparison.OrdinalIgnoreCase))
-                { prefix = a.Substring("--remote-prefix=".Length); enable = true; }
+                if (a.Equals("--debug", StringComparison.OrdinalIgnoreCase)) debug = true;
+                else if (a.Equals("--remote", StringComparison.OrdinalIgnoreCase))
+                    Properties.Settings.Default.Remote_Enabled = true;
+                else if (a.StartsWith("--remote-port=", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (int.TryParse(a.Substring("--remote-port=".Length), out int p))
+                        Properties.Settings.Default.Remote_Port = p;
+                    Properties.Settings.Default.Remote_Enabled = true;
+                }
                 else if (a.StartsWith("--remote-token=", StringComparison.OrdinalIgnoreCase))
-                { token = a.Substring("--remote-token=".Length); enable = true; }
+                {
+                    Properties.Settings.Default.Remote_Token = a.Substring("--remote-token=".Length);
+                    Properties.Settings.Default.Remote_Enabled = true;
+                }
             }
 
-            if (debug)
+            //Debug logging is also a persisted UI option; the flag just forces it on.
+            if (debug || Properties.Settings.Default.Debug_Logging)
             {
                 AppLog.Level = LogLevel.Debug;
                 AppLog.EnableFile();
             }
-            AppLog.Info("pCUE " + AppUpdateService.InstalledVersion + " starting" + (debug ? " (debug mode)" : ""));
+            AppLog.Info("pCUE " + AppUpdateService.InstalledVersion + " starting" +
+                        (AppLog.Level == LogLevel.Debug ? " (debug logging on)" : ""));
 
-            if (!enable) return;
+            //Restore the UI to the saved state, then start the server if it was left enabled.
+            Remote_Port_Box.Text = Properties.Settings.Default.Remote_Port.ToString();
+            Remote_Token_Box.Password = Properties.Settings.Default.Remote_Token ?? "";
+            Debug_Log_CheckBox.IsChecked = AppLog.Level == LogLevel.Debug;
+            Remote_Enable_CheckBox.IsChecked = Properties.Settings.Default.Remote_Enabled;   //fires the handler
+        }
+
+        //Start/stop the remote API + discovery beacon to match the checkbox, and report the URL the
+        //user should connect to. Called from the checkbox handler and at start-up.
+        private void ApplyRemoteControlState()
+        {
+            bool wanted = Remote_Enable_CheckBox.IsChecked == true;
+
+            //Always tear down first so a port/token edit takes effect on the next tick.
+            try { remoteServer?.Dispose(); } catch (Exception ex) { AppLog.Warn("Remote stop failed: " + ex.Message); }
+            try { discoveryBeacon?.Dispose(); } catch (Exception ex) { AppLog.Warn("Beacon stop failed: " + ex.Message); }
+            remoteServer = null;
+            discoveryBeacon = null;
+
+            if (!wanted)
+            {
+                SetRemoteStatus("● Off", System.Windows.Media.Brushes.Gainsboro);
+                return;
+            }
+
+            if (!int.TryParse(Remote_Port_Box.Text.Trim(), out int port) || port < 1 || port > 65535)
+            {
+                SetRemoteStatus("● Bad port", UpdateAlertBrush);
+                return;
+            }
+
+            string token = Remote_Token_Box.Password ?? "";
+
+            //With no token pCUE refuses every non-loopback request, so binding to all interfaces
+            //would be pointless as well as risky - stay on loopback until a token is set.
+            string prefix = string.IsNullOrEmpty(token)
+                ? "http://127.0.0.1:" + port + "/"
+                : "http://+:" + port + "/";
 
             try
             {
                 remoteServer = new RemoteControlServer(this, prefix, token);
                 remoteServer.Start();
-                AppLog.Info("Remote control listening on " + remoteServer.Prefix +
-                            (string.IsNullOrEmpty(token) ? " (loopback only)" : " (token required)"));
 
-                //Advertise on the LAN so a controller can find this bench without being told its IP.
-                int apiPort = 5056;
-                try { apiPort = new Uri(remoteServer.Prefix.Replace("+", "0.0.0.0").Replace("*", "0.0.0.0")).Port; }
-                catch (Exception ex) { AppLog.Warn("Could not parse API port, assuming 5056: " + ex.Message); }
-
-                discoveryBeacon = new DiscoveryBeacon(apiPort, !string.IsNullOrEmpty(token));
+                discoveryBeacon = new DiscoveryBeacon(port, !string.IsNullOrEmpty(token));
                 discoveryBeacon.Start();
+
+                string where = string.IsNullOrEmpty(token)
+                    ? "● Local only :" + port
+                    : "● LAN " + LocalIPv4() + ":" + port;
+                SetRemoteStatus(where, System.Windows.Media.Brushes.Lime);
+                AppLog.Info("Remote control enabled on " + prefix +
+                            (string.IsNullOrEmpty(token) ? " (loopback only - set a token for LAN access)" : " (token required)"));
             }
             catch (Exception ex)
             {
                 remoteServer = null;
+                discoveryBeacon = null;
+                Remote_Enable_CheckBox.IsChecked = false;
+                SetRemoteStatus("● Failed", UpdateAlertBrush);
                 AppLog.Error("Remote control could not start: " + ex.Message);
-                MessageBox.Show("Remote control could not start:\n\n" + ex.Message,
+                MessageBox.Show("Remote control could not start:\n\n" + ex.Message +
+                    "\n\nA LAN port may need to be allowed through the firewall.",
                     "pCUE", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
+        }
+
+        private void Remote_Settings_Changed(object sender, RoutedEventArgs e)
+        {
+            if (Remote_Port_Box == null || Remote_Token_Box == null) return;   //still loading XAML
+
+            Properties.Settings.Default.Remote_Enabled = Remote_Enable_CheckBox.IsChecked == true;
+            if (int.TryParse(Remote_Port_Box.Text.Trim(), out int port) && port > 0 && port < 65536)
+                Properties.Settings.Default.Remote_Port = port;
+            Properties.Settings.Default.Remote_Token = Remote_Token_Box.Password ?? "";
+            Properties.Settings.Default.Save();
+
+            ApplyRemoteControlState();
+        }
+
+        private void Debug_Log_Changed(object sender, RoutedEventArgs e)
+        {
+            bool on = Debug_Log_CheckBox.IsChecked == true;
+            Properties.Settings.Default.Debug_Logging = on;
+            Properties.Settings.Default.Save();
+
+            AppLog.Level = on ? LogLevel.Debug : LogLevel.Info;
+            if (on) AppLog.EnableFile();
+            AppLog.Info("Debug logging " + (on ? "ON" : "OFF") +
+                        (AppLog.FileEnabled ? " (file: " + AppLog.FilePath + ")" : ""));
+        }
+
+        private void SetRemoteStatus(string text, System.Windows.Media.Brush brush)
+        {
+            Remote_Status_Label.Text = text;
+            Remote_Status_Label.Foreground = brush;
+            Remote_Status_Label.ToolTip = remoteServer != null
+                ? "API: " + remoteServer.Prefix + "   Discovery: UDP 5057"
+                : text;
+        }
+
+        /// <summary>Best-effort primary IPv4, just for display.</summary>
+        private static string LocalIPv4()
+        {
+            try
+            {
+                using var s = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork,
+                    System.Net.Sockets.SocketType.Dgram, System.Net.Sockets.ProtocolType.Udp);
+                s.Connect("8.8.8.8", 65530);   //no traffic is sent; this just selects a route
+                return ((System.Net.IPEndPoint)s.LocalEndPoint).Address.ToString();
+            }
+            catch { return Environment.MachineName; }
         }
         #endregion
 

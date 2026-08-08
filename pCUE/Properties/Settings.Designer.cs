@@ -70,5 +70,53 @@ namespace pCUE.Properties {
                 this["Update_Manifest_Url"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool Remote_Enabled {
+            get {
+                return ((bool)(this["Remote_Enabled"]));
+            }
+            set {
+                this["Remote_Enabled"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("5056")]
+        public int Remote_Port {
+            get {
+                return ((int)(this["Remote_Port"]));
+            }
+            set {
+                this["Remote_Port"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string Remote_Token {
+            get {
+                return ((string)(this["Remote_Token"]));
+            }
+            set {
+                this["Remote_Token"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool Debug_Logging {
+            get {
+                return ((bool)(this["Debug_Logging"]));
+            }
+            set {
+                this["Debug_Logging"] = value;
+            }
+        }
     }
 }
