@@ -193,8 +193,22 @@ channel on **auto** is also wrong: the Commander mis-detects it and ignores duty
 | 1500 | ±15 | 1510 rpm | 57% |
 | 1200 | ±20 (shipped) | **1200 rpm, err 0** | 43% |
 
-1% duty ≈ 20–25 rpm on this fan, which is why ±50 stopped a full duty step early. Convergence is
-monotonic and takes ~40 s with the 4 s settle delay.
+1% duty ≈ 20–25 rpm on this fan, which is why ±50 stopped a full duty step early.
+
+### Both approach directions verified on 1.4.3 (2026-08-08)
+
+Every test above happened to start from a speed **below** the target, which is exactly why the two
+1.4.1 defects hid. Re-validated on 1.4.3 in both directions, ±20 tolerance:
+
+| Start | Target | Result | Duty | Time to Stable |
+|---|---|---|---|---|
+| 1410 rpm (52%) | 1100 — **descending** | 1097–1110, held 75 s | 39% | ~28 s |
+| 1105 rpm (40%) | 1600 — **ascending** | 1593–1597, held 33 s | 61% | ~45 s |
+
+**Convergence is monotonic only when ascending.** Descending it undershoots — the first coarse
+−5% step took 1410 → 1026 (74 rpm *past* target) and it then climbed back 36→37→38→39%. That is
+expected and harmless, but it is the exact shape that made 1.4.1 declare a false `Stable`, so don't
+"tidy" the reversal handling without re-running the descending case.
 
 ## UI conventions worth keeping
 - **The fan numeric box is deliberately overloaded**: `≤100` = power %, `>100` = RPM. No real fan
@@ -213,6 +227,27 @@ monotonic and takes ~40 s with the 4 s settle delay.
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-08-08 — v1.4.3 RPM-hold fix validated on the bench (both directions)
+- **The two 1.4.3 fixes in `FanRpmHoldController` are now confirmed on real hardware**, not just by
+  reasoning. Bench updated 1.4.1 → 1.4.3 via the in-app auto-updater (which worked end to end: the
+  remote API went dark for ~30 s while the installer replaced the running exe, then came back on
+  1.4.3). See the *Both approach directions verified* table above for the numbers.
+- **Fix 1 — stale initial reading.** Log shows `HOLD duty -> 40%` at 14:07:53.067 and the first
+  sample at 14:07:57.191: a 4 s gap, and that first reading is 1323 (already falling), not the
+  pre-hold 1410. Before the fix the loop read the *old* speed and drove the first correction the
+  wrong way.
+- **Fix 2 — false `Stable`.** During the descending run the duty reversed (40→35→36) while the error
+  was +73/+74. That reversal pattern is what made 1.4.1 park and report `Stable` 189 rpm off target.
+  On 1.4.3 the `nearEnough` gate (`|err| <= tolerance*3`) held it in `Ramping` until err = −6.
+- **A trap for the next session:** after an update the app restarts with **nothing connected** —
+  Commander closed, tachometer closed, no fan assigned, `hold.status = Idle`. Re-arm with
+  `/commander/open`, `/tach/connect`, `/tach/assign?fan=N` before any hold test.
+- **`hold.duty` in `/status` is the controller's last value, not the live duty.** With the hold
+  stopped it reports whatever the previous run ended on, which does not track a manual
+  `/fan/duty`. Cost ~5 minutes here (read 32% while the fan was really at ~50%/1366 rpm). Trust
+  the rpm reading, or the `WRITE_FAN_POWER` line in the log, not this field.
+- No code changed this session — validation only.
+
 ### 2026-08-08 — Installer + in-app updater, C# 12, tach review fixes
 - **Release packaging added** (`build/`): `pack-release.ps1`, `installer/pCUE.iss`, `sign.ps1`.
   Produces a single `pCUE_<ver>_setup.exe` (~2.8 MB) + portable zip + `.sha256`. See the *Release
