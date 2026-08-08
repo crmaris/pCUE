@@ -115,6 +115,38 @@ is how Windows recognises an in-place upgrade. `PrivilegesRequired=admin` (the a
 `CloseApplications=yes` so an update can replace a running `pCUE.exe`, and the HKCU `Run` value is
 removed on **uninstall only** so an in-place update keeps the user's Auto Start choice.
 
+## Remote control + debug logging
+Modelled on Powenetics V3's `RemoteControlServer`, so the two apps behave the same way. **Off unless
+asked for on the command line** — nothing is persisted and no token is ever written to disk.
+
+```
+pCUE.exe --remote --debug                                                  # loopback only
+pCUE.exe --remote-prefix=http://+:5056/ --remote-token=SECRET --debug      # LAN
+```
+
+- `--debug` sets the log to **Debug** and mirrors it to
+  `%LOCALAPPDATA%\pCUE\logs\pcue_<stamp>.log`.
+- **Security:** loopback is always allowed; **any non-loopback request is refused unless a token
+  matches**, so widening the prefix cannot accidentally expose unauthenticated fan control. Token
+  goes in `X-pCUE-Token` or `?token=`. Binding a non-loopback prefix needs elevation (pCUE already
+  runs elevated) and a firewall rule for TCP 5056 / UDP 5057.
+- **Discovery** (`Remote/DiscoveryBeacon.cs`): a *passive* UDP responder on 5057 — it answers a
+  `PCUE_DISCOVER` probe with app/version/host/url/requiresToken and is otherwise silent. It never
+  returns the token.
+- **CLI:** `tools/pcue-cli.ps1` (discover, status, log, debug, duty, rpm, mode, hold, stop, open,
+  close, cpu-start/stop, tach-connect/disconnect, assign, reset, watch). `GET /` lists every
+  endpoint at runtime.
+
+### Logging (`pCUE/Diagnostics/AppLog.cs`) — read this before adding diagnostics
+The rest of the app logs through `Debug.WriteLine`, which is `[Conditional("DEBUG")]` and therefore
+**compiled out of Release builds** — the builds users actually run produced *no* diagnostics, which
+made a remote hardware fault undebuggable. **Use `AppLog` for anything that must survive Release.**
+It keeps a 4000-line ring buffer (served by `GET /log`) plus an optional file.
+
+Every Commander PRO write is now traced with its command bytes **and the device's reply**, including
+the status byte (`0x00` OK / `0x01` error) that pCUE previously discarded — a rejected command used
+to look identical to a successful one.
+
 ## In-app updater  (`pCUE/Updates/AppUpdateService.cs`)
 Mirrors the Powenetics V2/V3 component updater. Reads the shared **public** manifest
 `https://raw.githubusercontent.com/crmaris/powenetics-updates/main/components.json`

@@ -142,6 +142,9 @@
     <Compile Include="HardwareInfo.cs" />
     <Compile Include="CorsairLightingProtocolConstants.cs" />
     <Compile Include="Control\FanRpmHoldController.cs" />
+    <Compile Include="Diagnostics\AppLog.cs" />
+    <Compile Include="Remote\DiscoveryBeacon.cs" />
+    <Compile Include="Remote\RemoteControlServer.cs" />
     <Compile Include="Tachometer\HidTachometer.cs" />
     <Compile Include="Updates\AppUpdateService.cs" />
     <Compile Include="MainWindow.xaml.cs">

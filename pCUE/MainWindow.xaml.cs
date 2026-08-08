@@ -56,7 +56,7 @@ namespace pCUE
     /// <summary>
     /// Interaction logic for MainWindow.xaml
     /// </summary>
-    public partial class MainWindow : Window
+    public partial class MainWindow : Window, IRemoteControlTarget
     {
         //App directory
         public static string BaseDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
@@ -174,6 +174,10 @@ namespace pCUE
         FanRpmHoldController rpmHold;
         volatile int holdChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
 
+        //Optional HTTP remote-control server. Off unless enabled on the command line.
+        RemoteControlServer remoteServer;
+        DiscoveryBeacon discoveryBeacon;
+
         //In-app updater (checks a signed-manifest URL; never installs on its own).
         AppUpdateService updateService;
         //Set while an update installer is being launched, so Window_Closing skips its
@@ -237,6 +241,8 @@ namespace pCUE
             if (Properties.Settings.Default.AVG_Values)
             { AVG_values.IsChecked = true; }
 
+            StartRemoteControlIfRequested();
+
             //Optional start-up update check. It only reports into the status line - it never
             //pops a dialog and never installs anything by itself.
             Update_On_Start_CheckBox.IsChecked = Properties.Settings.Default.Update_Check_On_Start;
@@ -268,6 +274,12 @@ namespace pCUE
 
             try { updateService?.Dispose(); }
             catch (Exception ex) { Debug.WriteLine("pCUE: update service dispose failed: " + ex.Message); }
+
+            try { remoteServer?.Dispose(); }
+            catch (Exception ex) { Debug.WriteLine("pCUE: remote server dispose failed: " + ex.Message); }
+
+            try { discoveryBeacon?.Dispose(); }
+            catch (Exception ex) { Debug.WriteLine("pCUE: discovery beacon dispose failed: " + ex.Message); }
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -772,6 +784,8 @@ namespace pCUE
                     // Send the command
                     stream.Write(outbuf);
                     stream.Read(inbuf);
+                    LogHidExchange("WRITE_FAN_DETECTION_TYPE fan=" + (selected_fan + 1) +
+                                   " mode=" + Fan_Mode_Controls[selected_fan].SelectedIndex, 5);
                 }
             }
         }
@@ -799,8 +813,24 @@ namespace pCUE
                     // Send the command
                     stream.Write(outbuf);
                     stream.Read(inbuf);
+                    LogHidExchange("WRITE_FAN_SPEED fan=" + (fan_channel + 1) + " rpm=" + fan_speed, 5);
                 }
             }
+        }
+
+        //Trace an HID command and the device's reply. The Commander PRO answers with a status byte
+        //(0x00 OK / 0x01 error) that pCUE historically ignored, so a rejected command looked
+        //identical to a successful one - e.g. an RPM target on a 3-pin channel, which the firmware
+        //does not support. Logging it is what makes that visible.
+        private void LogHidExchange(string what, int outBytes)
+        {
+            byte status = inbuf.Length > 0 ? inbuf[0] : (byte)0xFF;
+            bool ok = status == CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK;
+            string text = what
+                        + "  ->  " + AppLog.Hex(outbuf, outBytes)
+                        + "  <-  " + AppLog.Hex(inbuf, 6)
+                        + (ok ? "  [OK]" : "  [DEVICE REPORTED 0x" + status.ToString("x2") + "]");
+            if (ok) AppLog.Debug(text); else AppLog.Warn(text);
         }
 
         //Set The Fan Power
@@ -825,6 +855,7 @@ namespace pCUE
                     // Send the command
                     stream.Write(outbuf);
                     stream.Read(inbuf);
+                    LogHidExchange("WRITE_FAN_POWER fan=" + (fan_channel + 1) + " duty=" + fan_power + "%", 4);
                 }
             }
         }
@@ -1436,6 +1467,267 @@ namespace pCUE
                     Commander_Pro_Set_Fan_Speed(fan, fan_speed);                 
                 }                          
         }      
+
+        #region Remote control API (IRemoteControlTarget)
+        //Every member here can be called from an HTTP worker thread, so anything that touches WPF
+        //or shared UI state is marshalled onto the UI thread with Dispatcher.Invoke. The HID calls
+        //themselves are already serialized by hidLock and are safe from any thread.
+
+        //Fan numbers are 1-6 on the wire (matching the UI labels); channels are 0-5 internally.
+        private static bool TryChannel(int fan, out int channel, out string error)
+        {
+            channel = fan - 1;
+            if (fan < 1 || fan > 6)
+            {
+                error = "fan must be 1-6 (got " + fan + ").";
+                return false;
+            }
+            error = null;
+            return true;
+        }
+
+        public object GetStatus()
+        {
+            return Dispatcher.Invoke(new Func<object>(delegate
+            {
+                var fans = new List<object>();
+                for (int ch = 0; ch < 6; ch++)
+                {
+                    int rpm;
+                    lock (fanRpmLock) rpm = latestFanRpm[ch];
+
+                    string mode = "unknown";
+                    if (ch < Fan_Mode_Controls.Count)
+                    {
+                        switch (Fan_Mode_Controls[ch].SelectedIndex)
+                        {
+                            case 0: mode = "auto"; break;
+                            case 1: mode = "3pin"; break;
+                            case 2: mode = "4pin"; break;
+                            case 3: mode = "disconnect"; break;
+                        }
+                    }
+
+                    fans.Add(new
+                    {
+                        fan = ch + 1,
+                        rpm,
+                        mode,
+                        setpoint = ch < Fan_Numeric_Boxes.Count ? (int)Fan_Numeric_Boxes[ch].Value : 0,
+                    });
+                }
+
+                double? tachRpm = bench_tach != null && bench_tach.IsConnected ? bench_tach.ReadRpm() : null;
+
+                return new
+                {
+                    app = "pCUE",
+                    version = AppUpdateService.InstalledVersion,
+                    commander = new
+                    {
+                        connected = Corsair_Commander_Connected,
+                        firmware = Commander_SN.Text,
+                    },
+                    cpu = new
+                    {
+                        temperature = CPU_array.Count > 0 ? CPU_array[0].Text : null,
+                        mhz = CPU_array.Count > 3 ? CPU_array[3].Text : null,
+                        load = CPU_array.Count > 6 ? CPU_array[6].Text : null,
+                        monitoring = CpuDataTimer.Enabled,
+                    },
+                    fans,
+                    tachometer = new
+                    {
+                        connected = bench_tach != null && bench_tach.IsConnected,
+                        rpm = tachRpm,                      // null = stale or no signal
+                        batteryLow = bench_tach != null && bench_tach.BatteryLow,
+                        assignedFan = tachAssignedChannel >= 0 ? (int?)(tachAssignedChannel + 1) : null,
+                    },
+                    hold = new
+                    {
+                        running = rpmHold != null && rpmHold.IsRunning,
+                        status = rpmHold != null ? rpmHold.Status.ToString() : FanHoldStatus.Idle.ToString(),
+                        fan = holdChannel >= 0 ? (int?)(holdChannel + 1) : null,
+                        duty = rpmHold != null ? rpmHold.CurrentDuty : 0,
+                        target = (int)Hold_Target_Numeric.Value,
+                    },
+                };
+            }));
+        }
+
+        public string SetFanDuty(int fan, int duty)
+        {
+            if (!TryChannel(fan, out int channel, out string error)) return error;
+            if (duty < 0 || duty > 100) return "value must be 0-100 (percent).";
+            if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
+
+            //A remote duty command is the caller taking over from the hold loop.
+            Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote duty command"); }));
+            Commander_Pro_Set_Fan_Power(channel, duty);
+            return null;
+        }
+
+        public string SetFanRpm(int fan, int rpm)
+        {
+            if (!TryChannel(fan, out int channel, out string error)) return error;
+            if (rpm <= 100 || rpm > 3500) return "value must be 101-3500 RPM (<=100 would be read as a percent).";
+            if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
+
+            Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote rpm command"); }));
+            Commander_Pro_Set_Fan_Speed(channel, rpm);
+            return null;
+        }
+
+        public string SetFanMode(int fan, string mode)
+        {
+            if (!TryChannel(fan, out int channel, out string error)) return error;
+            if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
+
+            int index;
+            switch ((mode ?? "").Trim().ToLowerInvariant())
+            {
+                case "auto": index = 0; break;
+                case "3pin": case "3-pin": case "dc": index = 1; break;
+                case "4pin": case "4-pin": case "pwm": index = 2; break;
+                case "disconnect": case "off": index = 3; break;
+                default: return "value must be auto | 3pin | 4pin | disconnect.";
+            }
+
+            //Setting SelectedIndex raises SelectionChanged, which is what writes to the device.
+            Dispatcher.Invoke(new Action(delegate { Fan_Mode_Controls[channel].SelectedIndex = index; }));
+            return null;
+        }
+
+        public string StartHold(int fan, int rpm)
+        {
+            if (!TryChannel(fan, out int channel, out string error)) return error;
+            if (rpm <= 0 || rpm > 3500) return "rpm must be 1-3500.";
+
+            string result = null;
+            Dispatcher.Invoke(new Action(delegate
+            {
+                if (rpmHold != null && rpmHold.IsRunning) { result = "A hold is already running; stop it first."; return; }
+                Hold_Fan_Select.SelectedIndex = fan;          // index 0 is "None"
+                Hold_Target_Numeric.Value = (uint)rpm;
+                Hold_Start_Button_Click(this, null);
+                //The click handler reports its own reason (no feedback, not connected, ...).
+                if (rpmHold == null || !rpmHold.IsRunning) result = Hold_Status_Label.Text;
+            }));
+            return result;
+        }
+
+        public string StopHold()
+        {
+            Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote stop"); }));
+            return null;
+        }
+
+        public string SetCommanderOpen(bool open)
+        {
+            string result = null;
+            Dispatcher.Invoke(new Action(delegate
+            {
+                bool isOpen = Open_Corsair_Commander.Content.ToString() == "Close";
+                if (open == isOpen) { result = null; return; }      // already in the wanted state
+                Open_Corsair_Commander_Click(this, null);
+                if (open && !Corsair_Commander_Connected) result = "Could not open the Commander PRO.";
+            }));
+            return result;
+        }
+
+        public string SetCpuMonitoring(bool on)
+        {
+            Dispatcher.Invoke(new Action(delegate
+            {
+                bool running = Start_CPU_data.Content.ToString() == "Stop";
+                if (on != running) Start_CPU_data_Click(this, null);
+            }));
+            return null;
+        }
+
+        public string SetTachConnected(bool connected)
+        {
+            string result = null;
+            Dispatcher.Invoke(new Action(delegate
+            {
+                if (bench_tach == null) { result = "Tachometer driver not available."; return; }
+                if (connected == bench_tach.IsConnected) return;
+                try
+                {
+                    if (connected) bench_tach.Connect(); else bench_tach.Disconnect();
+                }
+                catch (Exception ex) { result = ex.Message; }
+            }));
+            return result;
+        }
+
+        public string SetTachAssignment(int fan)
+        {
+            if (fan < 0 || fan > 6) return "fan must be 0 (none) or 1-6.";
+            Dispatcher.Invoke(new Action(delegate { Tach_Fan_Assign.SelectedIndex = fan; }));
+            return null;
+        }
+
+        public string ResetStats()
+        {
+            Dispatcher.Invoke(new Action(delegate { Reset_function(); }));
+            return null;
+        }
+
+        //Command-line driven so nothing is persistently exposed and no token is ever written to disk:
+        //   pCUE.exe --remote
+        //   pCUE.exe --remote --remote-prefix=http://+:5056/ --remote-token=SECRET
+        //   pCUE.exe --debug            (verbose log + log file)
+        private void StartRemoteControlIfRequested()
+        {
+            string[] args = Environment.GetCommandLineArgs();
+            bool enable = false, debug = false;
+            string prefix = null, token = null;
+
+            foreach (string raw in args)
+            {
+                string a = raw.Trim();
+                if (a.Equals("--remote", StringComparison.OrdinalIgnoreCase)) enable = true;
+                else if (a.Equals("--debug", StringComparison.OrdinalIgnoreCase)) debug = true;
+                else if (a.StartsWith("--remote-prefix=", StringComparison.OrdinalIgnoreCase))
+                { prefix = a.Substring("--remote-prefix=".Length); enable = true; }
+                else if (a.StartsWith("--remote-token=", StringComparison.OrdinalIgnoreCase))
+                { token = a.Substring("--remote-token=".Length); enable = true; }
+            }
+
+            if (debug)
+            {
+                AppLog.Level = LogLevel.Debug;
+                AppLog.EnableFile();
+            }
+            AppLog.Info("pCUE " + AppUpdateService.InstalledVersion + " starting" + (debug ? " (debug mode)" : ""));
+
+            if (!enable) return;
+
+            try
+            {
+                remoteServer = new RemoteControlServer(this, prefix, token);
+                remoteServer.Start();
+                AppLog.Info("Remote control listening on " + remoteServer.Prefix +
+                            (string.IsNullOrEmpty(token) ? " (loopback only)" : " (token required)"));
+
+                //Advertise on the LAN so a controller can find this bench without being told its IP.
+                int apiPort = 5056;
+                try { apiPort = new Uri(remoteServer.Prefix.Replace("+", "0.0.0.0").Replace("*", "0.0.0.0")).Port; }
+                catch (Exception ex) { AppLog.Warn("Could not parse API port, assuming 5056: " + ex.Message); }
+
+                discoveryBeacon = new DiscoveryBeacon(apiPort, !string.IsNullOrEmpty(token));
+                discoveryBeacon.Start();
+            }
+            catch (Exception ex)
+            {
+                remoteServer = null;
+                AppLog.Error("Remote control could not start: " + ex.Message);
+                MessageBox.Show("Remote control could not start:\n\n" + ex.Message,
+                    "pCUE", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+        #endregion
 
         #region Closed-loop RPM hold
         //Feedback for the control loop: the RPM most recently shown for the held channel. That value

@@ -164,6 +164,9 @@ namespace pCUE
 
             try
             {
+                AppLog.Info("HOLD start: target=" + cfg.TargetRpm.ToString("0") + " RPM +/-" +
+                            cfg.RpmTolerance.ToString("0") + ", duty[" + cfg.MinDuty + ".." + cfg.MaxDuty +
+                            "] start=" + duty + "%, coarse=" + cfg.CoarseDutyStep + "% fine=" + cfg.FineDutyStep + "%");
                 SetStatus(FanHoldStatus.Ramping);
                 ApplyDuty(duty);
 
@@ -212,6 +215,10 @@ namespace pCUE
                     double filtered = AddSample(samples, raw.Value, cfg.RpmFilterWindow);
                     double error = target - filtered;
                     double absError = Math.Abs(error);
+
+                    AppLog.Debug("HOLD raw=" + raw.Value.ToString("0") + " filtered=" + filtered.ToString("0") +
+                                 " target=" + target.ToString("0") + " err=" + error.ToString("+0;-0;0") +
+                                 " duty=" + duty + "% status=" + Status);
 
                     if (absError < bestAbsError) { bestAbsError = absError; bestDuty = duty; }
 
@@ -304,6 +311,8 @@ namespace pCUE
             finally
             {
                 Volatile.Write(ref _running, 0);
+                if (faulted) AppLog.Error("HOLD fault: " + stopReason + " (duty left at " + duty + "%)");
+                else AppLog.Info("HOLD stopped: " + stopReason + " (duty left at " + duty + "%)");
                 SetStatus(faulted ? FanHoldStatus.Fault : FanHoldStatus.Stopped);
                 Emit(Status, null, Average(samples), GetTarget(), duty, stopReason);
                 try { _cts?.Dispose(); } catch { }
@@ -314,6 +323,7 @@ namespace pCUE
         private void ApplyDuty(int duty)
         {
             CurrentDuty = duty;
+            AppLog.Info("HOLD duty -> " + duty + "%");
             _setDuty(duty);
         }
 
