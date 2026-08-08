@@ -2031,6 +2031,18 @@ namespace pCUE
             }
         }
 
+        //True while the RPM poll loop is delivering fresh samples, whatever their VALUE. This is the
+        //"can this fan be measured at all" test, as opposed to ReadHeldFanRpm's "is it turning right
+        //now" - a stopped fan is a perfectly normal starting point for the hold, which spins it up.
+        private bool HasFreshRpmSource()
+        {
+            lock (fanRpmLock)
+            {
+                if (latestFanRpmUtc == DateTime.MinValue) return false;
+                return (DateTime.UtcNow - latestFanRpmUtc).TotalMilliseconds <= 2000;
+            }
+        }
+
         //Start the closed loop on a channel. Reports why it cannot start rather than failing quietly.
         //Called from Set Speed (the normal route) and from the remote API.
         private void StartRpmHold(int channel, double targetRpm)
@@ -2040,9 +2052,17 @@ namespace pCUE
 
             holdChannel = channel;
 
-            if (ReadHeldFanRpm() == null)
+            //Refuse only when nothing is measuring at all. A STOPPED fan reads 0, which
+            //ReadHeldFanRpm reports as "no reading" - and refusing on that deadlocked the app: no
+            //duty was written, so the fan could not start, so the reading stayed 0, so every later
+            //Set Speed was refused too. The fan became unrecoverable from the UI until the user
+            //unticked the checkbox, and the message blamed the tachometer, which was fine.
+            //The loop applies its start duty and waits SettleDelayMs before its first sample, which
+            //is ample for a fan to spin up; if the channel genuinely cannot be measured it stops
+            //itself on consecutive bad samples and leaves the fan running rather than stopped.
+            if (!HasFreshRpmSource())
             {
-                SetHoldStatus("No RPM feedback for Fan #" + (channel + 1) +
+                SetHoldStatus("No RPM readings for Fan #" + (channel + 1) +
                               " - connect the tachometer and point it at this fan.", UpdateAlertBrush);
                 holdChannel = -1;
                 return;

@@ -173,6 +173,10 @@ namespace pCUE
             int bestDuty = duty;
             double bestAbsError = double.MaxValue;
 
+            // The last duty that actually produced a reading. Used to tell a stalled fan apart from
+            // a dead sensor: if we still had RPM at a higher duty, the silence is our own doing.
+            int lastGoodDuty = -1;
+
             string stopReason = "stopped";
             bool faulted = false;
 
@@ -220,11 +224,28 @@ namespace pCUE
                         invalidCount++;
                         if (invalidCount >= cfg.MaxInvalidRpmSamples)
                         {
-                            // Signal lost. Leave the fan at its present duty (it keeps cooling) but
-                            // stop pretending to regulate - running open-loop on a dead sensor would
-                            // silently drift.
+                            // Two very different faults produce a run of unreadable samples, and they
+                            // need opposite responses:
+                            //
+                            //   the sensor died      -> leave the fan where it is (it keeps cooling)
+                            //   we stalled the fan   -> put the duty back up, or it stays stopped
+                            //
+                            // The second is self-inflicted: asking for an RPM below what the fan can
+                            // physically turn at walks the duty down until it stops, and a stopped fan
+                            // reads 0, which looks exactly like a dead tachometer. Backing off to the
+                            // last duty that gave a reading restarts it and names the real cause.
                             faulted = true;
-                            stopReason = "lost tachometer signal - duty held at " + duty + "%";
+                            if (lastGoodDuty > duty)
+                            {
+                                duty = lastGoodDuty;
+                                ApplyDuty(duty);
+                                stopReason = "target is below this fan's minimum speed - backed off to " +
+                                             duty + "%";
+                            }
+                            else
+                            {
+                                stopReason = "lost tachometer signal - duty held at " + duty + "%";
+                            }
                             break;
                         }
 
@@ -235,6 +256,7 @@ namespace pCUE
                     }
 
                     invalidCount = 0;
+                    lastGoodDuty = duty;
                     double filtered = AddSample(samples, raw.Value, cfg.RpmFilterWindow);
                     double error = target - filtered;
                     double absError = Math.Abs(error);
