@@ -227,6 +227,45 @@ expected and harmless, but it is the exact shape that made 1.4.1 declare a false
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-08-08 — v1.4.4/1.4.5/1.4.6: hold deadlock, battery warning, start-from-current-duty
+All three shipped and **verified on the bench on 1.4.6**.
+
+- **1.4.4 — the hold could strand a fan, and it happened to the owner.** `StartRpmHold` refused
+  whenever `ReadHeldFanRpm()` was null, and a **stopped fan reads 0**, which that helper reports as
+  "no reading". It returned **without writing any duty**, so the fan could not start, so the reading
+  stayed 0, so every later Set Speed was refused too — self-latching, and the message blamed the
+  tachometer, which was connected and fine. Typing a *higher* RPM did not help, which is the
+  symptom to recognise. Now gated on `HasFreshRpmSource()` ("can this channel be measured at all")
+  rather than "is it turning this instant".
+  Second half, in the controller: driving the duty below the fan's start-up point stalls it, and the
+  resulting zeros were reported as a lost tachometer signal with the duty left where it was, i.e.
+  stopped. It now tracks `lastGoodDuty` and, on a run of bad samples, **restores it** and reports
+  "target is below this fan's minimum speed".
+  *Verified:* fan stopped dead, `/hold/start rpm=800` → accepted, kicked to 40%, Stable at 786 rpm
+  in 30 s. On 1.4.3 the same call was refused outright and the fan stayed dead.
+- **1.4.5 — low-battery warning made visible.** The `BATT LOW` label existed but was default-size
+  text at the far right, and it followed the meter's **instantaneous** flag. That flag flickers (LOW
+  at 14:18, clear minutes later on the same cell), so the label blinked on and off and the first
+  real low battery in this app's life was only ever seen in the log. Now 16 pt bold yellow, and it
+  **latches** until the meter disconnects — which is what changing the cell does. The modal warning
+  is no longer re-armed when the flag merely goes clear, or one tired cell would pop it repeatedly.
+  **Not verified on hardware** — the owner fitted a fresh cell before it could be tested.
+- **1.4.6 — the hold no longer takes a detour through 40% duty.** `StartDuty` was a fixed 40%, so
+  *every* hold began by slamming the fan there regardless of where it already was. The smaller the
+  requested change, the more absurd the trip. Measured on 1.4.3, holding 400 RPM from 318 RPM/12%:
+  duty forced to 40%, fan shot to **1063 rpm** (3× the target, wrong direction), then walked back
+  down over **33.2 s** to settle at **14%** — half a minute to move the duty two points.
+  Now opens at the duty pCUE last commanded on that channel (`lastCommandedDuty[]`), and skips the
+  initial settle wait when starting from the current duty (nothing to settle, nothing stale).
+  *Verified on 1.4.6:* same test → **Stable in 12.1 s, peak 391 rpm, no excursion.**
+- **Known gap, not fixed:** `lastCommandedDuty` is per-session, so **the first hold after an app
+  restart still falls back to the 40% kick** even on a spinning fan. `Commander_Pro_READ_FAN_Power`
+  (0x22) exists and would close this, but **it has never been called** — it is dead code and the
+  `inbuf[2]` offset is unverified. Validate it against a known duty before trusting it.
+- **Correction to an earlier claim in this file:** 300 RPM was said to be below this fan's floor,
+  extrapolated from `20% → 608 rpm`. The fan actually runs at ~318 rpm at 12%, so 300 is probably
+  reachable and that inference was wrong. The deadlock was real regardless.
+
 ### 2026-08-08 — v1.4.3 RPM-hold fix validated on the bench (both directions)
 - **The two 1.4.3 fixes in `FanRpmHoldController` are now confirmed on real hardware**, not just by
   reasoning. Bench updated 1.4.1 → 1.4.3 via the in-app auto-updater (which worked end to end: the
