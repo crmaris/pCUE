@@ -183,8 +183,10 @@ namespace pCUE
 
         //Duty pCUE last commanded per channel, -1 if none this session. The RPM hold starts from
         //this rather than a fixed percentage, so a small target change stays a small move.
-        //Tracked rather than read back over HID: every duty in this app goes through
-        //Commander_Pro_Set_Fan_Power, whereas the READ_FAN_POWER path has never been exercised.
+        //It is the preferred source because every duty in this app goes through
+        //Commander_Pro_Set_Fan_Power; READ_FAN_POWER (0x22) is the fallback that covers the gap
+        //this cannot - the first hold after an app restart, when the fan is running at a duty the
+        //device remembers and pCUE does not.
         readonly int[] lastCommandedDuty = new int[6] { -1, -1, -1, -1, -1, -1 };
 
         //What to open at when the fan is stopped: there is nothing to measure, and nothing to
@@ -2089,9 +2091,22 @@ namespace pCUE
             //seven coarse steps to walk back down - roughly half a minute of travel for a 50 RPM
             //change. Starting where the fan is makes a small change a couple of 1% steps.
             int knownDuty = lastCommandedDuty[channel];
-            if (ReadHeldFanRpm() != null && knownDuty > 0)
+            int reportedDuty = Commander_Pro_READ_FAN_Power((byte)channel);
+
+            //Both sources are logged every time, not just the one used: it is the only way to see
+            //the device read-back agreeing (or not) with what pCUE believes it commanded.
+            AppLog.Info("HOLD start duty: pCUE tracked=" + (knownDuty < 0 ? "none" : knownDuty + "%") +
+                        ", Commander reports=" + reportedDuty + "%");
+
+            //Prefer what pCUE commanded; fall back to what the Commander reports. The device keeps
+            //its duty across an app restart but pCUE's memory does not, so without the read-back the
+            //FIRST hold of every session ignored a perfectly good running fan and kicked it to 40%.
+            //A failed read returns 0 and simply degrades to that same kick.
+            int startFrom = knownDuty >= 0 ? knownDuty : reportedDuty;
+
+            if (ReadHeldFanRpm() != null && startFrom > 0)
             {
-                holdConfig.StartDuty = knownDuty;
+                holdConfig.StartDuty = startFrom;
                 holdConfig.StartDutyIsCurrent = true;
             }
             else
