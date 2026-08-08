@@ -227,6 +227,48 @@ expected and harmless, but it is the exact shape that made 1.4.1 declare a false
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-08-08 — v1.4.8 tried to make the hold faster, oscillated, and was reverted (v1.4.9)
+**Read this before trying to speed up the hold loop again — the obvious optimisation is a trap.**
+
+Owner asked for faster convergence "without losing stabilization". 1.4.8 tried two things:
+size each step from the fan's measured RPM-per-percent instead of a fixed coarse/fine pair, and
+scale the settle wait to the step size (2500 ms for a 1% move instead of a flat 4000 ms).
+
+**It made things much worse.** Same 350→400 RPM test, same fan, measured on the bench:
+
+| Build | Time to Stable | Peak RPM | Behaviour |
+|---|---|---|---|
+| 1.4.3 | 33.2 s | 1063 | detour via the fixed 40% start |
+| **1.4.6 / 1.4.9** | **12.1 s** | **391** | clean, monotonic |
+| 1.4.8 | 59.5 s | 507 | **hunted**: duty 16→15→13→14→16→18→16→13→12→13→14→16→18 |
+
+Two wrong assumptions, both pushing the same way:
+- **"A small duty step settles almost instantly."** It does not, at low RPM. A fan turning at
+  ~300–400 rpm has very little torque and takes **8–10 s** to reach a new steady speed. The log is
+  unambiguous: after stepping to 16% duty the RPM read **383** at settle-end and kept climbing to
+  423, then 437, over the following five seconds. The loop corrected against a value the fan had
+  already left, then corrected the correction.
+- **`rpm/duty` is not the incremental slope.** Seeding the step estimate from the operating point
+  gave 24.5 rpm/%, but the slope actually measured across that move was **35.8 rpm/%**, so the step
+  was oversized as well as under-settled.
+
+**The tachometer's refresh rate was measured properly and is worth keeping:** polling a steady fan
+at 250 ms, the meter emits a new value every **1873 ms median (1698 min / 2145 max)**. That is a
+hard floor on any settle time — below it you re-read the previous value rather than a fresh one.
+The measurement was right; the conclusion drawn from it was not, because the *fan* is slower than
+the meter at low RPM.
+
+**Conclusion: ~12 s for a two-step change is close to the floor**, which is roughly
+(one meter refresh + the fan's mechanical settling) per step, plus the 3 s stabilization window.
+Meaningful gains need a faster feedback source, not a cleverer loop. Do not re-attempt this
+without first measuring the fan's settling time *at the RPM in question*.
+
+**Trap discovered while reverting:** `git revert` of a commit that included the packed version bump
+rolls `AssemblyFileVersion` **backwards** (here to 1.4.7, below the already-released 1.4.8). The
+in-app updater compares versions, so the fix would never have been offered to anyone on 1.4.8.
+After reverting a released commit, always check `AssemblyInfo.cs` and hand-set it above the highest
+published version before packing.
+
 ### 2026-08-08 — v1.4.4/1.4.5/1.4.6: hold deadlock, battery warning, start-from-current-duty
 All three shipped and **verified on the bench on 1.4.6**.
 
