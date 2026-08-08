@@ -252,6 +252,7 @@ namespace pCUE
             //the iCUE services, which would be a rude thing to do unasked on every launch. It earns
             //its place on a test bench, where an auto-update restart otherwise leaves the hardware
             //disconnected until somebody walks over and clicks two buttons.
+            Tacho_Adjust_CheckBox.IsChecked = Properties.Settings.Default.Tacho_Adjust;
             Auto_Connect_CheckBox.IsChecked = Properties.Settings.Default.Auto_Connect;
             if (Properties.Settings.Default.Auto_Connect)
             {
@@ -1468,9 +1469,9 @@ namespace pCUE
 
         private void Set_Fan_Speed_Click(object sender, RoutedEventArgs e)
         {
-            //A manual Set Speed is the user taking over; a running hold loop would immediately
-            //fight it back to its own duty.
-            StopRpmHold("manual Set Speed");
+            //Any running loop is superseded by this press - either it is restarted below with the
+            //newly typed target, or the user has switched that fan back to plain duty.
+            StopRpmHold("Set Speed pressed");
 
             for (int i = 0; i <= 5; i++)
             {
@@ -1484,18 +1485,28 @@ namespace pCUE
 
             int fan_speed = 0;
 
-           fan_speed = (int)Fan_Numeric_Boxes[fan].Value; 
-           
+           fan_speed = (int)Fan_Numeric_Boxes[fan].Value;
+
             if (fan_speed <= 100) //Gia to Power
-                {                            
+                {
                     Commander_Pro_Set_Fan_Power(fan, fan_speed);
                 }
 
                 else if (fan_speed > 100) //Gia to Speed
                 {
-                    Commander_Pro_Set_Fan_Speed(fan, fan_speed);                 
-                }                          
-        }      
+                    //"Adjust fan speed from Tacho" ticked, and this is the fan the tachometer is on:
+                    //hold the typed RPM with the software loop instead of asking the Commander,
+                    //which cannot regulate by RPM without a tach signal of its own.
+                    if (Tacho_Adjust_CheckBox.IsChecked == true && fan == tachAssignedChannel)
+                    {
+                        StartRpmHold(fan, fan_speed);
+                    }
+                    else
+                    {
+                        Commander_Pro_Set_Fan_Speed(fan, fan_speed);
+                    }
+                }
+        }
 
         #region Remote control API (IRemoteControlTarget)
         //Every member here can be called from an HTTP worker thread, so anything that touches WPF
@@ -1578,7 +1589,8 @@ namespace pCUE
                         status = rpmHold != null ? rpmHold.Status.ToString() : FanHoldStatus.Idle.ToString(),
                         fan = holdChannel >= 0 ? (int?)(holdChannel + 1) : null,
                         duty = rpmHold != null ? rpmHold.CurrentDuty : 0,
-                        target = (int)Hold_Target_Numeric.Value,
+                        target = (int)holdConfig.TargetRpm,
+                        tachoAdjust = Tacho_Adjust_CheckBox.IsChecked == true,
                     },
                 };
             }));
@@ -1637,9 +1649,10 @@ namespace pCUE
             {
                 if (rpmHold != null && rpmHold.IsRunning) { result = "A hold is already running; stop it first."; return; }
                 Tach_Fan_Assign.SelectedIndex = fan;          // index 0 is "None"
-                Hold_Target_Numeric.Value = (uint)rpm;
-                Hold_Start_Button_Click(this, null);
-                //The click handler reports its own reason (no feedback, not connected, ...).
+                Tacho_Adjust_CheckBox.IsChecked = true;       // keep the UI honest about what is driving
+                Fan_Numeric_Boxes[fan - 1].Value = (uint)rpm; // the fan's own box is the setpoint now
+                StartRpmHold(fan - 1, rpm);
+                //StartRpmHold reports its own reason (no feedback, not connected, ...).
                 if (rpmHold == null || !rpmHold.IsRunning) result = Hold_Status_Label.Text;
             }));
             return result;
@@ -1696,7 +1709,8 @@ namespace pCUE
             if ((v = get("target")).HasValue)
             {
                 holdConfig.TargetRpm = v.Value;
-                Dispatcher.Invoke(new Action(delegate { Hold_Target_Numeric.Value = (uint)v.Value; }));
+                if (holdChannel >= 0 && holdChannel < Fan_Numeric_Boxes.Count)
+                    Dispatcher.Invoke(new Action(delegate { Fan_Numeric_Boxes[holdChannel].Value = (uint)v.Value; }));
                 if (rpmHold != null && rpmHold.IsRunning) rpmHold.UpdateTarget(v.Value);
             }
 
@@ -1941,41 +1955,24 @@ namespace pCUE
             }
         }
 
-        private void Hold_Start_Button_Click(object sender, RoutedEventArgs e)
+        //Start the closed loop on a channel. Reports why it cannot start rather than failing quietly.
+        //Called from Set Speed (the normal route) and from the remote API.
+        private void StartRpmHold(int channel, double targetRpm)
         {
-            if (rpmHold != null && rpmHold.IsRunning)
-            {
-                rpmHold.Stop();                  //status/caption update when the loop exits
-                return;
-            }
+            if (channel < 0 || channel > 5) { SetHoldStatus("Pick a fan first.", UpdateAlertBrush); return; }
+            if (!Corsair_Commander_Connected) { SetHoldStatus("Open the Commander PRO first.", UpdateAlertBrush); return; }
 
-            //One selector for the whole panel: the fan the tachometer reads is the fan we hold.
-            //Two separate dropdowns had to agree for the loop to have any feedback, and nothing
-            //enforced that - an easy way to start a loop that could never converge.
-            int sel = Tach_Fan_Assign.SelectedIndex;
-            if (sel < 1 || sel > 6)
-            {
-                SetHoldStatus("Pick a fan first.", UpdateAlertBrush);
-                return;
-            }
-            if (!Corsair_Commander_Connected)
-            {
-                SetHoldStatus("Open the Commander PRO first.", UpdateAlertBrush);
-                return;
-            }
-
-            holdChannel = sel - 1;
+            holdChannel = channel;
 
             if (ReadHeldFanRpm() == null)
             {
-                SetHoldStatus("No RPM feedback for Fan #" + sel +
-                              " - assign the tachometer to it, or check its tach wire.", UpdateAlertBrush);
+                SetHoldStatus("No RPM feedback for Fan #" + (channel + 1) +
+                              " - connect the tachometer and point it at this fan.", UpdateAlertBrush);
                 holdChannel = -1;
                 return;
             }
 
-            holdConfig.TargetRpm = Hold_Target_Numeric.Value;
-            var cfg = holdConfig;
+            holdConfig.TargetRpm = targetRpm;
 
             rpmHold = new FanRpmHoldController(
                 duty => Commander_Pro_Set_Fan_Power(holdChannel, duty),
@@ -1987,21 +1984,28 @@ namespace pCUE
 
             try
             {
-                rpmHold.StartAsync(cfg);
-                Hold_Start_Button.Content = "Stop Hold";
-                SetHoldStatus("Starting...", UpdateInfoBrush);
+                rpmHold.StartAsync(holdConfig);
+                SetHoldStatus("Holding Fan #" + (channel + 1) + " at " + targetRpm.ToString("0") + " RPM...", UpdateInfoBrush);
             }
             catch (Exception ex)
             {
-                Debug.WriteLine("pCUE: could not start RPM hold: " + ex.Message);
+                AppLog.Error("Could not start RPM hold: " + ex.Message);
                 SetHoldStatus("Could not start: " + ex.Message, UpdateAlertBrush);
             }
         }
 
-        //Live setpoint change while the loop runs - no restart needed.
-        private void Hold_Target_ValueChanged(object sender, RoutedPropertyChangedEventArgs<uint> e)
+        //Unticking hands the fan back to plain duty control; the fan keeps its current duty until
+        //the next Set Speed, rather than jumping.
+        private void Tacho_Adjust_Changed(object sender, RoutedEventArgs e)
         {
-            if (rpmHold != null && rpmHold.IsRunning) rpmHold.UpdateTarget(Hold_Target_Numeric.Value);
+            Properties.Settings.Default.Tacho_Adjust = Tacho_Adjust_CheckBox.IsChecked == true;
+            Properties.Settings.Default.Save();
+
+            if (Tacho_Adjust_CheckBox.IsChecked != true)
+            {
+                StopRpmHold("tacho adjust switched off");
+                SetHoldStatus("", UpdateInfoBrush);
+            }
         }
 
         private void Rpm_Hold_SnapshotUpdated(object sender, FanHoldSnapshot s)
@@ -2022,12 +2026,9 @@ namespace pCUE
 
         private void Rpm_Hold_StatusChanged(object sender, FanHoldStatus status)
         {
-            if (status != FanHoldStatus.Fault && status != FanHoldStatus.Stopped) return;
-            try
-            {
-                Dispatcher.BeginInvoke(new Action(delegate { Hold_Start_Button.Content = "Hold RPM"; }));
-            }
-            catch (Exception ex) { Debug.WriteLine("pCUE: hold status dispatch failed: " + ex.Message); }
+            //The snapshot handler already paints the status line; nothing else to switch now that
+            //the loop is driven by the normal Set Speed button rather than its own toggle.
+            AppLog.Debug("HOLD status -> " + status);
         }
 
         private void SetHoldStatus(string text, System.Windows.Media.Brush brush)

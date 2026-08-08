@@ -130,5 +130,17 @@ namespace pCUE.Properties {
                 this["Auto_Connect"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("False")]
+        public bool Tacho_Adjust {
+            get {
+                return ((bool)(this["Tacho_Adjust"]));
+            }
+            set {
+                this["Tacho_Adjust"] = value;
+            }
+        }
     }
 }
