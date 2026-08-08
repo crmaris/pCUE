@@ -34,8 +34,15 @@ namespace pCUE
     public sealed class FanHoldConfig
     {
         public double TargetRpm { get; set; } = 1000;
-        /// <summary>+/- RPM considered "on target".</summary>
-        public double RpmTolerance { get; set; } = 50;
+        /// <summary>
+        /// +/- RPM considered "on target". Measured on the bench, 1% duty moves a typical fan by
+        /// roughly 20-25 RPM, so this is deliberately set near (slightly under) one duty step: it
+        /// pushes the loop to the closest reachable duty rather than stopping early. With the old
+        /// value of 50 a 1500 RPM target settled at 1464; at 20 the same fan holds 1510.
+        /// A tolerance the actuator cannot resolve is safe - the resolution-limit detection parks
+        /// on the closer duty instead of hunting.
+        /// </summary>
+        public double RpmTolerance { get; set; } = 20;
 
         // Duty envelope (Commander PRO fan power is a whole-number percent, 0-100).
         public int MinDuty { get; set; } = 0;
