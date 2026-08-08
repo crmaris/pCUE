@@ -184,6 +184,15 @@ namespace pCUE
                 SetStatus(FanHoldStatus.Ramping);
                 ApplyDuty(duty);
 
+                // The fan is still turning at whatever speed it was doing before this loop began,
+                // which may be nowhere near StartDuty. Give it the same settle time a mid-run
+                // correction gets and throw away everything measured during it - otherwise the very
+                // first error is computed from the OLD duty and the loop confidently corrects in the
+                // wrong direction. (Seen on the bench: starting a 1100 RPM hold from a fan running
+                // at ~1400 walked the duty DOWN to 911 RPM.)
+                if (!await Delay(cfg.SettleDelayMs, ct)) { stopReason = "stopped before settling"; }
+                else { samples.Clear(); }
+
                 var overall = Stopwatch.StartNew();
 
                 while (!ct.IsCancellationRequested)
@@ -281,7 +290,14 @@ namespace pCUE
                         if (lastFineDirection != 0 && direction != lastFineDirection) reversals++;
                         lastFineDirection = direction;
 
-                        if (reversals >= ResolutionLimitReversals)
+                        // Only accept "cannot get closer" when we are genuinely near the target.
+                        // Direction can also flip while still far away (overshoot during a ramp),
+                        // and parking then would report Stable at an arbitrary error - the loop once
+                        // announced Stable 189 RPM off a 1100 RPM target this way.
+                        bool nearEnough = absError <= cfg.RpmTolerance * 3;
+                        if (!nearEnough) { reversals = 0; }
+
+                        if (nearEnough && reversals >= ResolutionLimitReversals)
                         {
                             if (duty != bestDuty) { duty = bestDuty; ApplyDuty(duty); }
                             everStable = true;
