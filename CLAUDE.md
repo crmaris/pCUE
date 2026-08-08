@@ -227,6 +227,25 @@ expected and harmless, but it is the exact shape that made 1.4.1 declare a false
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-08-08 — v1.5.0: duty read-back closes the last "kick to 40%" case
+The Commander PRO keeps its fan duty across a pCUE restart; `lastCommandedDuty[]` is per-session,
+so the **first** hold of every session used to ignore a perfectly good running fan and kick it to
+40%. `READ_FAN_POWER` (0x22) is now the fallback when pCUE has not commanded a duty itself.
+
+- **The `inbuf[2]` offset was never actually a guess**, though it had never been called:
+  `Commander_Pro_READ_FAN_Speed` — used by the poll loop and known to report correct RPM — parses
+  `inbuf[2] << 8 | inbuf[3]`, so payload data starts at `inbuf[2]` and the power read uses the same
+  convention. Verified anyway against ground truth (below).
+- **Both sources are logged on every hold start, used or not**, so the device read-back can always
+  be checked against what pCUE believes it commanded. Keep this — it is what made the verification
+  below a measurement rather than an assumption.
+- *Verified end to end:* fan left at **33% duty / 932 rpm**, pCUE updated (restart wipes the
+  tracker), Commander re-opened without commanding any duty. First hold logged
+  `pCUE tracked=none, Commander reports=33%` and started at 33%. Converged to 1000 rpm in **12.1 s**,
+  monotonic 33→34→35, peak 990, no overshoot. A failed read returns 0 and degrades to the old kick.
+- Also re-checked after the 1.4.8 revert: 350→400 on **1.4.9** settles in **16.6 s**, monotonic
+  13→14→15, peak 411, no hunting. The revert is clean.
+
 ### 2026-08-08 — v1.4.8 tried to make the hold faster, oscillated, and was reverted (v1.4.9)
 **Read this before trying to speed up the hold loop again — the obvious optimisation is a trap.**
 
