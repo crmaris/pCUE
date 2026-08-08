@@ -54,6 +54,9 @@ namespace pCUE
 
         /// <summary>Live-tune the loop. The callback returns null for keys the caller omitted.</summary>
         string SetHoldConfig(Func<string, double?> get);
+
+        /// <summary>Renders a window to PNG bytes. window: "main" or "help".</summary>
+        byte[] CaptureScreenshot(string window);
     }
 
     /// <summary>
@@ -300,6 +303,28 @@ namespace pCUE
                         AppLog.Clear();
                         await WriteJsonAsync(context, HttpStatusCode.OK, new { ok = true }).ConfigureAwait(false);
                         return;
+
+                    case "/screenshot":
+                        {
+                            //Rendered off the live visual tree, so it shows the real UI state -
+                            //which is the only way to check layout, the icon or the help text on a
+                            //machine you cannot see.
+                            string which = context.Request.QueryString["window"] ?? "main";
+                            byte[] png = _target.CaptureScreenshot(which);
+                            if (png == null || png.Length == 0)
+                            {
+                                await WriteJsonAsync(context, HttpStatusCode.InternalServerError,
+                                    new { error = "Could not render '" + which + "'." }).ConfigureAwait(false);
+                                return;
+                            }
+                            HttpListenerResponse r = context.Response;
+                            r.StatusCode = (int)HttpStatusCode.OK;
+                            r.ContentType = "image/png";
+                            r.ContentLength64 = png.Length;
+                            await r.OutputStream.WriteAsync(png, 0, png.Length).ConfigureAwait(false);
+                            r.Close();
+                            return;
+                        }
 
                     case "/stream":
                         await StreamAsync(context).ConfigureAwait(false);

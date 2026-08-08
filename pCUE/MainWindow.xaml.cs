@@ -1722,6 +1722,69 @@ namespace pCUE
             return null;
         }
 
+        /// <summary>
+        /// Renders a window to a PNG. Uses RenderTargetBitmap over the live visual tree rather than
+        /// a desktop grab, so it works regardless of what is on top, whether the window is minimised,
+        /// or whether anyone is logged in at the console. It captures the client area only - window
+        /// chrome is drawn by Windows, not by WPF.
+        /// </summary>
+        public byte[] CaptureScreenshot(string window)
+        {
+            return Dispatcher.Invoke(new Func<byte[]>(delegate
+            {
+                try
+                {
+                    Window target = this;
+                    if (!string.IsNullOrEmpty(window) &&
+                        window.Trim().Equals("help", StringComparison.OrdinalIgnoreCase))
+                    {
+                        //Measure/Arrange alone is NOT enough: a window that has never been shown has
+                        //no built visual tree, and RenderTargetBitmap then produces a blank image.
+                        //Show it far off-screen so WPF applies templates and lays it out for real.
+                        var help = new HelpWindow
+                        {
+                            WindowStartupLocation = WindowStartupLocation.Manual,
+                            Left = -32000,
+                            Top = -32000,
+                            ShowInTaskbar = false,
+                        };
+                        try
+                        {
+                            help.Show();
+                            help.UpdateLayout();
+                            return RenderToPng(help, (int)Math.Ceiling(help.ActualWidth),
+                                                     (int)Math.Ceiling(help.ActualHeight));
+                        }
+                        finally { try { help.Close(); } catch { } }
+                    }
+
+                    int w = (int)Math.Ceiling(target.ActualWidth);
+                    int h = (int)Math.Ceiling(target.ActualHeight);
+                    if (w <= 0 || h <= 0) { w = (int)target.Width; h = (int)target.Height; }
+                    return RenderToPng(target, w, h);
+                }
+                catch (Exception ex)
+                {
+                    AppLog.Error("Screenshot failed: " + ex.Message);
+                    return null;
+                }
+            }));
+        }
+
+        private static byte[] RenderToPng(System.Windows.Media.Visual visual, int width, int height)
+        {
+            if (width <= 0 || height <= 0) return null;
+            var rtb = new System.Windows.Media.Imaging.RenderTargetBitmap(
+                width, height, 96, 96, System.Windows.Media.PixelFormats.Pbgra32);
+            rtb.Render(visual);
+
+            var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+            encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(rtb));
+            using var ms = new System.IO.MemoryStream();
+            encoder.Save(ms);
+            return ms.ToArray();
+        }
+
         public string SetCommanderOpen(bool open)
         {
             string result = null;
