@@ -166,6 +166,32 @@ on `crmaris/pCUE` (the repo is public, so its release assets are anonymously dow
 prints the exact values. Do **not** point the manifest at `updates.cybenetics.com` — that is Faganas
 Light's commercial licensing endpoint, not an app-update feed.
 
+## Bench validation of the RPM hold (2026-08-08, DESKTOP-OU4447V, remote API)
+Driven entirely over the remote API against a real Commander PRO + handheld tachometer.
+
+**The fan under test is a PWM fan whose tach never reaches the Commander** (every channel reads
+0 rpm). Channel 2, measured:
+
+| Fan 2 mode | 100% | 50% | 20% |
+|---|---|---|---|
+| **4-pin (PWM)** | 2292 rpm | 1368 rpm | 608 rpm |
+| **3-pin (DC)** | will not run | 0 | — |
+
+So for this fan the mode must be **4-pin**. Setting it to 3-pin (the intuitive choice for "no PWM
+wire") stops it dead — a PWM fan's controller generally will not run on reduced voltage. Leaving the
+channel on **auto** is also wrong: the Commander mis-detects it and ignores duty entirely.
+
+**Closed-loop hold results** (feedback from the bench tachometer):
+
+| Target | Tolerance | Settles at | Duty |
+|---|---|---|---|
+| 1500 | ±50 (old default) | 1464 rpm | 55% |
+| 1500 | ±15 | 1510 rpm | 57% |
+| 1200 | ±20 (shipped) | **1200 rpm, err 0** | 43% |
+
+1% duty ≈ 20–25 rpm on this fan, which is why ±50 stopped a full duty step early. Convergence is
+monotonic and takes ~40 s with the 4 s settle delay.
+
 ## Session log (newest first)
 ### 2026-08-08 — Installer + in-app updater, C# 12, tach review fixes
 - **Release packaging added** (`build/`): `pack-release.ps1`, `installer/pCUE.iss`, `sign.ps1`.
