@@ -47,14 +47,21 @@ namespace pCUE
         /// <summary>|RPM error| above which the coarse step is used.</summary>
         public double CoarseErrorThreshold { get; set; } = 200;
 
-        public int SampleIntervalMs { get; set; } = 250;
-        /// <summary>Wait after each duty change so the fan (and the tach) can catch up.</summary>
-        public int SettleDelayMs { get; set; } = 1200;
+        public int SampleIntervalMs { get; set; } = 500;
+        /// <summary>
+        /// Wait after each duty change before believing the tachometer again. This has to cover the
+        /// fan's mechanical settling AND the handheld tachometer's own refresh - measured on the
+        /// bench, a fan needs several seconds. Too short and the loop reads a stale RPM, over-
+        /// corrects, and oscillates instead of converging (observed: duty 75->65 while RPM was
+        /// still RISING 1605->1870).
+        /// </summary>
+        public int SettleDelayMs { get; set; } = 4000;
         public int StabilizationTimeMs { get; set; } = 3000;
         /// <summary>Max time to first Stable. 0 disables.</summary>
-        public int TimeoutMs { get; set; } = 90000;
+        public int TimeoutMs { get; set; } = 120000;
 
-        public int RpmFilterWindow { get; set; } = 5;
+        /// <summary>Kept short: a long window is extra lag in an already laggy loop.</summary>
+        public int RpmFilterWindow { get; set; } = 3;
         public int MaxInvalidRpmSamples { get; set; } = 8;
     }
 
@@ -299,6 +306,12 @@ namespace pCUE
                     duty = newDuty;
                     ApplyDuty(duty);
                     if (!await Delay(cfg.SettleDelayMs, ct)) break;
+
+                    //Throw away everything measured before/at the change. Without this the moving
+                    //average blends pre-change and post-change readings, so the next error is
+                    //computed from an RPM the fan has already left - which is what makes a laggy
+                    //plant oscillate rather than converge.
+                    samples.Clear();
                 }
             }
             catch (OperationCanceledException) { /* normal stop */ }

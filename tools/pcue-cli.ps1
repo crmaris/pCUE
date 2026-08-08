@@ -67,14 +67,34 @@ function Invoke-Api {
 }
 
 function Find-Instances {
-    # Broadcast a probe and collect every reply until the timeout.
+    # Send the probe to the SUBNET-DIRECTED broadcast address of every IPv4 interface, not just
+    # 255.255.255.255. On a multi-homed box (WSL, Hyper-V switches, VPN adapters) a single
+    # 255.255.255.255 datagram leaves via one interface only - usually the wrong one - so the bench
+    # PC never hears it.
     $udp = New-Object System.Net.Sockets.UdpClient
     try {
         $udp.EnableBroadcast = $true
         $udp.Client.ReceiveTimeout = $DiscoverTimeoutMs
         $probe = [Text.Encoding]::UTF8.GetBytes('PCUE_DISCOVER')
-        $ep = New-Object Net.IPEndPoint ([Net.IPAddress]::Broadcast), 5057
-        [void]$udp.Send($probe, $probe.Length, $ep)
+
+        $targets = @([Net.IPAddress]::Broadcast)
+        foreach ($a in Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue) {
+            if ($a.IPAddress -like '127.*' -or $a.IPAddress -like '169.254.*') { continue }
+            try {
+                $ipBytes   = ([Net.IPAddress]::Parse($a.IPAddress)).GetAddressBytes()
+                $maskBits  = [uint32]$a.PrefixLength
+                $maskValue = if ($maskBits -eq 0) { 0 } else { [uint32]::MaxValue -shl (32 - $maskBits) }
+                $maskBytes = [BitConverter]::GetBytes([uint32]$maskValue)
+                if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($maskBytes) }
+                # host bits all 1 = the directed broadcast for that subnet
+                $bcast = 0..3 | ForEach-Object { [byte]($ipBytes[$_] -bor (-bnot $maskBytes[$_] -band 0xFF)) }
+                $targets += [Net.IPAddress]::new([byte[]]$bcast)
+            } catch { }
+        }
+
+        foreach ($t in ($targets | Sort-Object -Property IPAddressToString -Unique)) {
+            try { [void]$udp.Send($probe, $probe.Length, (New-Object Net.IPEndPoint $t, 5057)) } catch { }
+        }
 
         $found = @()
         $deadline = [DateTime]::UtcNow.AddMilliseconds($DiscoverTimeoutMs)
@@ -85,7 +105,7 @@ function Find-Instances {
                 $found += ([Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json)
             } catch { break }   # timeout
         }
-        return $found
+        return $found | Sort-Object -Property url -Unique
     } finally { $udp.Close() }
 }
 

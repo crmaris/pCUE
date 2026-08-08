@@ -173,6 +173,9 @@ namespace pCUE
         //on a 3-pin (DC) channel it offers fixed percent only, so pCUE closes that loop itself.
         FanRpmHoldController rpmHold;
         volatile int holdChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
+        //Live tunables for the hold loop, editable over the remote API so the controller can be
+        //tuned against real hardware without rebuilding and redeploying the app.
+        readonly FanHoldConfig holdConfig = new FanHoldConfig();
 
         //Optional HTTP remote-control server. Off unless enabled on the command line.
         RemoteControlServer remoteServer;
@@ -1622,6 +1625,63 @@ namespace pCUE
             return null;
         }
 
+        public object GetHoldConfig()
+        {
+            return new
+            {
+                holdConfig.TargetRpm,
+                holdConfig.RpmTolerance,
+                holdConfig.MinDuty,
+                holdConfig.MaxDuty,
+                holdConfig.StartDuty,
+                holdConfig.CoarseDutyStep,
+                holdConfig.FineDutyStep,
+                holdConfig.CoarseErrorThreshold,
+                holdConfig.SampleIntervalMs,
+                holdConfig.SettleDelayMs,
+                holdConfig.StabilizationTimeMs,
+                holdConfig.TimeoutMs,
+                holdConfig.RpmFilterWindow,
+                holdConfig.MaxInvalidRpmSamples,
+            };
+        }
+
+        /// <summary>
+        /// Live-tune the hold loop. Only the supplied keys change. Takes effect on the next Start;
+        /// the target can also be retargeted live while running.
+        /// </summary>
+        public string SetHoldConfig(Func<string, double?> get)
+        {
+            double? v;
+            if ((v = get("tolerance")).HasValue) holdConfig.RpmTolerance = v.Value;
+            if ((v = get("minDuty")).HasValue) holdConfig.MinDuty = (int)v.Value;
+            if ((v = get("maxDuty")).HasValue) holdConfig.MaxDuty = (int)v.Value;
+            if ((v = get("startDuty")).HasValue) holdConfig.StartDuty = (int)v.Value;
+            if ((v = get("coarseStep")).HasValue) holdConfig.CoarseDutyStep = (int)v.Value;
+            if ((v = get("fineStep")).HasValue) holdConfig.FineDutyStep = (int)v.Value;
+            if ((v = get("coarseThreshold")).HasValue) holdConfig.CoarseErrorThreshold = v.Value;
+            if ((v = get("sampleInterval")).HasValue) holdConfig.SampleIntervalMs = (int)v.Value;
+            if ((v = get("settleDelay")).HasValue) holdConfig.SettleDelayMs = (int)v.Value;
+            if ((v = get("stabilizeTime")).HasValue) holdConfig.StabilizationTimeMs = (int)v.Value;
+            if ((v = get("timeout")).HasValue) holdConfig.TimeoutMs = (int)v.Value;
+            if ((v = get("filterWindow")).HasValue) holdConfig.RpmFilterWindow = Math.Max(1, (int)v.Value);
+            if ((v = get("maxInvalid")).HasValue) holdConfig.MaxInvalidRpmSamples = Math.Max(1, (int)v.Value);
+
+            if ((v = get("target")).HasValue)
+            {
+                holdConfig.TargetRpm = v.Value;
+                Dispatcher.Invoke(new Action(delegate { Hold_Target_Numeric.Value = (uint)v.Value; }));
+                if (rpmHold != null && rpmHold.IsRunning) rpmHold.UpdateTarget(v.Value);
+            }
+
+            if (holdConfig.MinDuty < 0) holdConfig.MinDuty = 0;
+            if (holdConfig.MaxDuty > 100) holdConfig.MaxDuty = 100;
+            if (holdConfig.RpmTolerance <= 0) holdConfig.RpmTolerance = 25;
+
+            AppLog.Info("Hold config updated via remote API.");
+            return null;
+        }
+
         public string SetCommanderOpen(bool open)
         {
             string result = null;
@@ -1879,12 +1939,8 @@ namespace pCUE
                 return;
             }
 
-            var cfg = new FanHoldConfig
-            {
-                TargetRpm = Hold_Target_Numeric.Value,
-                //Start from the duty the fan is on now if we know it, else a mid-scale guess.
-                StartDuty = 40,
-            };
+            holdConfig.TargetRpm = Hold_Target_Numeric.Value;
+            var cfg = holdConfig;
 
             rpmHold = new FanRpmHoldController(
                 duty => Commander_Pro_Set_Fan_Power(holdChannel, duty),

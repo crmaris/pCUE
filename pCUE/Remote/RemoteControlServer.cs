@@ -48,6 +48,12 @@ namespace pCUE
 
         /// <summary>Reset the Min/Max/Avg statistics.</summary>
         string ResetStats();
+
+        /// <summary>Current closed-loop tunables.</summary>
+        object GetHoldConfig();
+
+        /// <summary>Live-tune the loop. The callback returns null for keys the caller omitted.</summary>
+        string SetHoldConfig(Func<string, double?> get);
     }
 
     /// <summary>
@@ -190,6 +196,40 @@ namespace pCUE
                     case "/hold/stop":
                         await Act(context, body => _target.StopHold()).ConfigureAwait(false);
                         return;
+
+                    case "/hold/config":
+                        {
+                            //No parameters at all = read; otherwise apply what was supplied.
+                            Dictionary<string, object> body = await ReadBodyAsync(context.Request).ConfigureAwait(false);
+                            bool any = (body != null && body.Count > 0) || context.Request.QueryString.Count > 0;
+                            if (!any)
+                            {
+                                await WriteJsonAsync(context, HttpStatusCode.OK, _target.GetHoldConfig()).ConfigureAwait(false);
+                                return;
+                            }
+
+                            string err = _target.SetHoldConfig(name =>
+                            {
+                                if (body != null && body.TryGetValue(name, out object bv) && bv != null &&
+                                    double.TryParse(Convert.ToString(bv), System.Globalization.NumberStyles.Any,
+                                                    System.Globalization.CultureInfo.InvariantCulture, out double bd))
+                                    return bd;
+                                string q = context.Request.QueryString[name];
+                                if (!string.IsNullOrWhiteSpace(q) &&
+                                    double.TryParse(q, System.Globalization.NumberStyles.Any,
+                                                    System.Globalization.CultureInfo.InvariantCulture, out double qd))
+                                    return qd;
+                                return null;
+                            });
+
+                            if (err == null)
+                                await WriteJsonAsync(context, HttpStatusCode.OK,
+                                    new { ok = true, config = _target.GetHoldConfig() }).ConfigureAwait(false);
+                            else
+                                await WriteJsonAsync(context, HttpStatusCode.BadRequest,
+                                    new { ok = false, error = err }).ConfigureAwait(false);
+                            return;
+                        }
 
                     case "/commander/open":
                         await Act(context, body => _target.SetCommanderOpen(true)).ConfigureAwait(false);
