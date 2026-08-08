@@ -161,6 +161,8 @@ namespace pCUE
         //the tach reading; when the tach signal is stale/lost it falls back to the Commander PRO value.
         HidTachometer bench_tach;
         volatile int tachAssignedChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
+        //So the low-battery dialog appears once per connection instead of every 500 ms tick.
+        bool tachBatteryWarned = false;
 
         //Latest RPM per channel as shown in the Current column, i.e. AFTER the bench-tachometer
         //override. The closed-loop RPM hold feeds on this, so it automatically uses the external
@@ -2176,6 +2178,7 @@ namespace pCUE
             {
                 Tach_RPM_Readout.Text = "----";
                 Tach_Battery_Label.Visibility = Visibility.Collapsed;
+                tachBatteryWarned = false;      //re-arm the warning for the next session
                 return;
             }
 
@@ -2184,14 +2187,40 @@ namespace pCUE
             {
                 Tach_RPM_Readout.Text = Math.Round(rpm.Value).ToString();
                 Tach_RPM_Readout.Foreground = UpdateInfoBrush;
-                Tach_Battery_Label.Visibility = bench_tach.BatteryLow ? Visibility.Visible : Visibility.Collapsed;
             }
             else
             {
                 //Connected but no fresh frame - say so instead of showing a stale number.
                 Tach_RPM_Readout.Text = "no signal";
                 Tach_RPM_Readout.Foreground = UpdateAlertBrush;
-                Tach_Battery_Label.Visibility = Visibility.Collapsed;
+            }
+
+            //Battery state is shown whenever the meter is connected, INDEPENDENT of whether a
+            //reading is fresh. Tying it to a fresh reading hid the warning in exactly the case
+            //that matters: a battery flat enough to stop the meter sending frames.
+            bool low = bench_tach.BatteryLow;
+            Tach_Battery_Label.Visibility = low ? Visibility.Visible : Visibility.Collapsed;
+
+            if (low && !tachBatteryWarned)
+            {
+                tachBatteryWarned = true;
+                AppLog.Warn("Tachometer battery is LOW - readings may stop or drift. Replace it.");
+
+                //Say it once per connection, and not from inside this timer tick: a modal dialog
+                //here would stall the UI timer that drives the whole panel.
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    MessageBox.Show(
+                        "The bench tachometer reports a LOW BATTERY.\n\n" +
+                        "Replace it before trusting these readings - a flat battery makes the meter " +
+                        "drift and then stop sending, which will also stall any RPM hold that is " +
+                        "using it for feedback.",
+                        "pCUE - tachometer battery low", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }));
+            }
+            else if (!low)
+            {
+                tachBatteryWarned = false;      //fresh cells - arm it again
             }
         }
 
