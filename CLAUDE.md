@@ -249,8 +249,21 @@ in the original and came across with the port; both are now fixed here.
    `1234`. Both parses are now `NumberStyles.Float` + `CultureInfo.InvariantCulture`. The bench is
    en-US (verified), so this was latent here.
 
-A real all-zeros display still decodes and publishes as a genuine 0. Builds clean. **Bench-untested
-— the hold's behaviour on a dropped tach signal has not been exercised on hardware since.**
+A real all-zeros display still decodes and publishes as a genuine 0. Builds clean.
+
+**Why this is lower-risk than "a control change that has not been on the bench" usually is.** The
+null path it now feeds is not new — `FanRpmHoldController` already counts unreadable samples to
+`MaxInvalidRpmSamples` and then deliberately splits two cases: sensor died → hold the duty (the fan
+keeps cooling), versus we stalled the fan → back off to `lastGoodDuty`. That code's own comment
+names the exact ambiguity this fix removes: *"a stopped fan reads 0, which looks exactly like a
+dead tachometer."* Before, an unreadable frame WAS a 0 and could never reach that logic; now a
+genuinely stopped fan still reads a real 0 (the display sends "000000", which decodes), and only
+unreadable frames go down the lost-signal path the controller was written for. So the change routes
+a case into existing designed handling rather than introducing new behaviour.
+
+**Still worth one deliberate bench check**, because that path has not been exercised on hardware
+since: start a hold, block the tachometer's optical beam, and confirm it reports lost signal and
+holds duty instead of winding the duty up.
 
 Reference implementation, extracted and unit-tested: `TachoFrameDecoder` in FanRpmControl.
 
