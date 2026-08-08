@@ -116,6 +116,10 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
+    <Page Include="HelpWindow.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </Page>
     <Page Include="MainWindow.xaml">
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
@@ -132,6 +136,9 @@
     <Compile Include="Remote\RemoteControlServer.cs" />
     <Compile Include="Tachometer\HidTachometer.cs" />
     <Compile Include="Updates\AppUpdateService.cs" />
+    <Compile Include="HelpWindow.xaml.cs">
+      <DependentUpon>HelpWindow.xaml</DependentUpon>
+    </Compile>
     <Compile Include="MainWindow.xaml.cs">
       <DependentUpon>MainWindow.xaml</DependentUpon>
       <SubType>Code</SubType>
@@ -208,9 +215,14 @@
             text,
             "AssemblyFileVersion\\(\"(\\d+)\\.(\\d+)\\.(\\d+)\"\\)",
             delegate(Match m) {
-                int rev = int.Parse(m.Groups[3].Value) + 1;
-                return "AssemblyFileVersion(\"" + m.Groups[1].Value + "." +
-                       m.Groups[2].Value + "." + rev + "\")";
+                int major = int.Parse(m.Groups[1].Value);
+                int minor = int.Parse(m.Groups[2].Value);
+                int rev   = int.Parse(m.Groups[3].Value) + 1;
+                // The last component is a TENTH, so it carries: 1.3.9 -> 1.4.0, not 1.3.10.
+                // Without this the "+0.1" scheme breaks down into two-digit revisions.
+                if (rev > 9) { rev = 0; minor++; }
+                if (minor > 9) { minor = 0; major++; }
+                return "AssemblyFileVersion(\"" + major + "." + minor + "." + rev + "\")";
             });
         if (updated != text) {
             File.WriteAllText(AssemblyInfoPath, updated);

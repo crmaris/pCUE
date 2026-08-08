@@ -1892,6 +1892,19 @@ namespace pCUE
             ApplyRemoteControlState();
         }
 
+        private void Help_Button_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var help = new HelpWindow { Owner = this };
+                help.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                AppLog.Warn("Could not open the help window: " + ex.Message);
+            }
+        }
+
         private void Auto_Connect_Changed(object sender, RoutedEventArgs e)
         {
             Properties.Settings.Default.Auto_Connect = Auto_Connect_CheckBox.IsChecked == true;
