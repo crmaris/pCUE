@@ -227,6 +227,33 @@ expected and harmless, but it is the exact shape that made 1.4.1 declare a false
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-08-08 — Tachometer decode: phantom zero and culture-sensitive parse (inherited bugs)
+
+Two defects found while working on the **Fan Control Application**, the app this driver was
+**ported from** (`pCUE/Tachometer/HidTachometer.cs` ← `FanRpmControl` ← Faganas ATX12V). Both were
+in the original and came across with the port; both are now fixed here.
+
+1. **A frame that failed to decode published a fake `0 rpm`.** `realRpm` started at 0, a failed
+   parse left it 0, and it was published anyway — so a garbled frame, a blank display or an "L"
+   under-range marker was indistinguishable from a genuinely stopped fan. **In the Faganas apps
+   that behaviour is correct and was deliberately left alone** (measurement app: "nothing
+   measured" IS zero, and their DataCheck reads 0 as "designed zero-rpm mode or no tacho signal").
+   **pCUE is not a measurement app.** This feeds the closed-loop RPM hold, where a phantom zero is
+   a large fake error that drives the duty UP — and because the frame still refreshed
+   `_latestRpmUtc` it *looked fresh*, so `StalenessMs` and the lost-signal path never fired.
+   Now nothing is published on a failed decode and `ReadRpm()` goes stale, which the hold loop
+   already knows how to handle.
+
+2. **The parse used the current culture.** The segment table emits `.` as the display's decimal
+   point; on a culture where `.` is the GROUP separator (de-DE, fr-FR, el-GR) `123.4` read as
+   `1234`. Both parses are now `NumberStyles.Float` + `CultureInfo.InvariantCulture`. The bench is
+   en-US (verified), so this was latent here.
+
+A real all-zeros display still decodes and publishes as a genuine 0. Builds clean. **Bench-untested
+— the hold's behaviour on a dropped tach signal has not been exercised on hardware since.**
+
+Reference implementation, extracted and unit-tested: `TachoFrameDecoder` in FanRpmControl.
+
 ### 2026-08-08 — v1.5.0: duty read-back closes the last "kick to 40%" case
 The Commander PRO keeps its fan duty across a pCUE restart; `lastCommandedDuty[]` is per-session,
 so the **first** hold of every session used to ignore a perfectly good running fan and kick it to

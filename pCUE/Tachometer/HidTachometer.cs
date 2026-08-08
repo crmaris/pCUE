@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using HidSharp;
@@ -376,18 +377,34 @@ namespace pCUE
                 }
             }
 
+            // A frame only yields a reading if its digits actually form a number.
+            //
+            // This driver was ported from the Fan Control Application, which inherited the decode
+            // from Faganas ATX12V. In the Faganas apps the tachometer is a MEASUREMENT input and
+            // publishing 0 for an unreadable frame is correct - "nothing measured" is zero, and
+            // their DataCheck layer already reads 0 as "designed zero-rpm mode or no tacho signal".
+            // pCUE is different: this feeds a CLOSED-LOOP RPM hold. A phantom zero there is not a
+            // harmless display value, it is a large fake error that drives the duty UP, and because
+            // the frame refreshed _latestRpmUtc it also looked fresh, so the staleness window and
+            // the lost-signal handling never fired. Publish nothing instead and let ReadRpm() go
+            // stale, which is what the hold loop already knows how to handle.
+            //
+            // InvariantCulture: the table above emits '.' as the display's decimal point, and on a
+            // culture where '.' is the GROUP separator (de-DE, fr-FR, el-GR) the old parse read
+            // "123.4" as 1234 - a silent 10x error.
             double realRpm = 0;
+            bool decoded = false;
             try
             {
                 string rpmText = result.Length >= 6 ? result.Substring(0, 6) : "";
-                double parsed;
-                if (double.TryParse(rpmText, out parsed))
+                if (double.TryParse(rpmText, NumberStyles.Float, CultureInfo.InvariantCulture, out _))
                 {
                     rpmText = Reverse(rpmText);
-                    realRpm = Convert.ToDouble(rpmText);
+                    decoded = double.TryParse(rpmText, NumberStyles.Float, CultureInfo.InvariantCulture,
+                                              out realRpm);
                 }
             }
-            catch { }
+            catch { decoded = false; }
 
             bool batteryLow = false;
             try
@@ -398,7 +415,7 @@ namespace pCUE
             catch { }
             _batteryLow = batteryLow;
 
-            if (realRpm >= 0 && realRpm < MaxRpm)
+            if (decoded && realRpm >= 0 && realRpm < MaxRpm)
             {
                 double rounded = RoundI(realRpm, 1);
                 lock (_rxLock)
