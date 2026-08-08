@@ -162,6 +162,24 @@ namespace pCUE
         HidTachometer bench_tach;
         volatile int tachAssignedChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
 
+        //Latest RPM per channel as shown in the Current column, i.e. AFTER the bench-tachometer
+        //override. The closed-loop RPM hold feeds on this, so it automatically uses the external
+        //tachometer when one is assigned and the Commander's own reading otherwise.
+        readonly int[] latestFanRpm = new int[6];
+        DateTime latestFanRpmUtc = DateTime.MinValue;
+        readonly object fanRpmLock = new object();
+
+        //Closed-loop RPM hold. The Commander PRO only regulates by RPM on 4-pin/PWM channels;
+        //on a 3-pin (DC) channel it offers fixed percent only, so pCUE closes that loop itself.
+        FanRpmHoldController rpmHold;
+        volatile int holdChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
+
+        //In-app updater (checks a signed-manifest URL; never installs on its own).
+        AppUpdateService updateService;
+        //Set while an update installer is being launched, so Window_Closing skips its
+        //"Really close?" prompt - the user has already confirmed the update.
+        bool suppressCloseConfirm = false;
+
         public MainWindow()
         {
             InitializeComponent();
@@ -189,8 +207,11 @@ namespace pCUE
 
             //External bench tachometer - created here, opened only when the user clicks Connect.
             bench_tach = new HidTachometer();
-            bench_tach.ReadingChanged += Bench_Tach_ReadingChanged;
             bench_tach.ConnectionChanged += Bench_Tach_ConnectionChanged;
+            //The live RPM readout is refreshed by Update_Tach_Panel() on the 500 ms UI timer, so
+            //the panel and the fan column agree on what "fresh" means.
+
+            updateService = new AppUpdateService();
         }
 
         #region Main Window Functions
@@ -216,11 +237,21 @@ namespace pCUE
             if (Properties.Settings.Default.AVG_Values)
             { AVG_values.IsChecked = true; }
 
+            //Optional start-up update check. It only reports into the status line - it never
+            //pops a dialog and never installs anything by itself.
+            Update_On_Start_CheckBox.IsChecked = Properties.Settings.Default.Update_Check_On_Start;
+            if (Properties.Settings.Default.Update_Check_On_Start)
+            {
+                _ = RunUpdateCheck(false);
+            }
         }
 
         private void Window_Closed(object sender, EventArgs e)
         {
             CpuDataTimer.Stop();
+
+            //stop the closed-loop hold before the HID stream goes away
+            StopRpmHold("application closing");
 
             //stop background fan polling and release the HID stream
             Corsair_Commander_Connected = false;
@@ -234,10 +265,20 @@ namespace pCUE
             //release the external bench tachometer (stops its read thread, closes the HID stream)
             try { bench_tach?.Dispose(); }
             catch (Exception ex) { Debug.WriteLine("pCUE: tach dispose failed: " + ex.Message); }
+
+            try { updateService?.Dispose(); }
+            catch (Exception ex) { Debug.WriteLine("pCUE: update service dispose failed: " + ex.Message); }
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            //An update install already asked for confirmation - do not ask a second time.
+            if (suppressCloseConfirm)
+            {
+                CpuDataTimer.Stop();
+                return;
+            }
+
             MessageBoxResult result = MessageBox.Show("Really close?", "Warning", MessageBoxButton.YesNo);
             if (result != MessageBoxResult.Yes)
             {
@@ -289,6 +330,9 @@ namespace pCUE
 
             //feed the dedicated fan Average column (always live, independent of the AVG checkbox)
             Set_Fan_Average_Column();
+
+            //keep the bench-tachometer readout honest about stale/lost signal
+            Update_Tach_Panel();
         }
 
         //Shows the running average of each fan in its own column (ed28..ed33)
@@ -406,6 +450,13 @@ namespace pCUE
                             {
                                 double? tachRpm = bench_tach.ReadRpm();
                                 if (tachRpm.HasValue) rpms[tachCh] = (int)Math.Round(tachRpm.Value);
+                            }
+
+                            //Publish for the closed-loop RPM hold (post-tach-override values).
+                            lock (fanRpmLock)
+                            {
+                                Array.Copy(rpms, latestFanRpm, 6);
+                                latestFanRpmUtc = DateTime.UtcNow;
                             }
 
                             if (!token.IsCancellationRequested)
@@ -526,6 +577,7 @@ namespace pCUE
         //disconnect that fires after repeated poll failures. Idempotent and null-safe.
         private void DisconnectCommanderPro(string statusText, System.Windows.Media.Brush statusBrush)
         {
+            StopRpmHold("Commander disconnected");   //the loop has no actuator without the device
             Corsair_Commander_Connected = false;
             StopFanPolling();   //cancellation only - never waits on the poll task
             CloseHidStream();   //nulls + closes the stream, interrupting any blocked read
@@ -1219,7 +1271,14 @@ namespace pCUE
                     // Min column:
                     //  - Fans (Grid 2) always keep the real Min; their running Average has its own column now.
                     //  - CPU (Grid 1) shows the real Min, or the running Average when the "Average Values" box is ticked.
-                    if ((Grid == 2) || (AVG_values.IsChecked == false))
+                    //
+                    // Only a reading > 0 may move Min. A 0 means "no sample" here (an unpopulated
+                    // Commander channel, or a bench tachometer whose signal went stale), and this
+                    // block already treats 0 in the Min box as "unset" - so without this guard a
+                    // single 0 would overwrite an established minimum and then be re-seeded from
+                    // the next reading, permanently losing the real minimum for the run.
+                    if (((Grid == 2) || (AVG_values.IsChecked == false))
+                        && (Convert.ToDouble(Sample_array[current].Text) > 0))
                     {
                         if (Convert.ToDouble(Sample_array[min].Text) == 0)
                         {
@@ -1348,7 +1407,11 @@ namespace pCUE
         }       
 
         private void Set_Fan_Speed_Click(object sender, RoutedEventArgs e)
-        {         
+        {
+            //A manual Set Speed is the user taking over; a running hold loop would immediately
+            //fight it back to its own duty.
+            StopRpmHold("manual Set Speed");
+
             for (int i = 0; i <= 5; i++)
             {
                 Set_Fan_Speed_Function_Commander_Pro(i);
@@ -1374,6 +1437,255 @@ namespace pCUE
                 }                          
         }      
 
+        #region Closed-loop RPM hold
+        //Feedback for the control loop: the RPM most recently shown for the held channel. That value
+        //is already the bench tachometer's reading when one is assigned to this fan and fresh, and
+        //the Commander's own tach reading otherwise - so the loop works for a fan with no usable
+        //tach wire AND for a 3-pin fan the Commander can read but refuses to regulate.
+        //Returns null (an invalid sample, from the loop's point of view) when there is no
+        //trustworthy reading: nothing polled recently, or a zero, which means "no signal".
+        private double? ReadHeldFanRpm()
+        {
+            int ch = holdChannel;
+            if (ch < 0 || ch > 5) return null;
+
+            lock (fanRpmLock)
+            {
+                if (latestFanRpmUtc == DateTime.MinValue) return null;
+                //The poll loop runs every 500 ms; anything older than 2 s means it has stalled.
+                if ((DateTime.UtcNow - latestFanRpmUtc).TotalMilliseconds > 2000) return null;
+                int rpm = latestFanRpm[ch];
+                return rpm > 0 ? (double?)rpm : null;
+            }
+        }
+
+        private void Hold_Start_Button_Click(object sender, RoutedEventArgs e)
+        {
+            if (rpmHold != null && rpmHold.IsRunning)
+            {
+                rpmHold.Stop();                  //status/caption update when the loop exits
+                return;
+            }
+
+            int sel = Hold_Fan_Select.SelectedIndex;
+            if (sel < 1 || sel > 6)
+            {
+                SetHoldStatus("Pick a fan to hold first.", UpdateAlertBrush);
+                return;
+            }
+            if (!Corsair_Commander_Connected)
+            {
+                SetHoldStatus("Open the Commander PRO first.", UpdateAlertBrush);
+                return;
+            }
+
+            holdChannel = sel - 1;
+
+            if (ReadHeldFanRpm() == null)
+            {
+                SetHoldStatus("No RPM feedback for Fan #" + sel +
+                              " - assign the tachometer to it, or check its tach wire.", UpdateAlertBrush);
+                holdChannel = -1;
+                return;
+            }
+
+            var cfg = new FanHoldConfig
+            {
+                TargetRpm = Hold_Target_Numeric.Value,
+                //Start from the duty the fan is on now if we know it, else a mid-scale guess.
+                StartDuty = 40,
+            };
+
+            rpmHold = new FanRpmHoldController(
+                duty => Commander_Pro_Set_Fan_Power(holdChannel, duty),
+                ReadHeldFanRpm,
+                () => Corsair_Commander_Connected);
+
+            rpmHold.SnapshotUpdated += Rpm_Hold_SnapshotUpdated;
+            rpmHold.StatusChanged += Rpm_Hold_StatusChanged;
+
+            try
+            {
+                rpmHold.StartAsync(cfg);
+                Hold_Start_Button.Content = "Stop Hold";
+                SetHoldStatus("Starting...", UpdateInfoBrush);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("pCUE: could not start RPM hold: " + ex.Message);
+                SetHoldStatus("Could not start: " + ex.Message, UpdateAlertBrush);
+            }
+        }
+
+        //Live setpoint change while the loop runs - no restart needed.
+        private void Hold_Target_ValueChanged(object sender, RoutedPropertyChangedEventArgs<uint> e)
+        {
+            if (rpmHold != null && rpmHold.IsRunning) rpmHold.UpdateTarget(Hold_Target_Numeric.Value);
+        }
+
+        private void Rpm_Hold_SnapshotUpdated(object sender, FanHoldSnapshot s)
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    string text = s.Status + "  " + Math.Round(s.FilteredRpm) + " RPM @ " + s.Duty + "%";
+                    if (!string.IsNullOrEmpty(s.Note)) text += "  (" + s.Note + ")";
+                    SetHoldStatus(text, s.Status == FanHoldStatus.Fault ? UpdateAlertBrush
+                                      : s.Status == FanHoldStatus.Stable ? System.Windows.Media.Brushes.Lime
+                                      : UpdateInfoBrush);
+                }));
+            }
+            catch (Exception ex) { Debug.WriteLine("pCUE: hold snapshot dispatch failed: " + ex.Message); }
+        }
+
+        private void Rpm_Hold_StatusChanged(object sender, FanHoldStatus status)
+        {
+            if (status != FanHoldStatus.Fault && status != FanHoldStatus.Stopped) return;
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(delegate { Hold_Start_Button.Content = "Hold RPM"; }));
+            }
+            catch (Exception ex) { Debug.WriteLine("pCUE: hold status dispatch failed: " + ex.Message); }
+        }
+
+        private void SetHoldStatus(string text, System.Windows.Media.Brush brush)
+        {
+            Hold_Status_Label.Text = text;
+            Hold_Status_Label.Foreground = brush;
+            Hold_Status_Label.ToolTip = text;
+        }
+
+        //Stop the loop and forget it. Used on manual Set Speed (the user is taking over), on
+        //Commander disconnect, and on shutdown.
+        private void StopRpmHold(string why)
+        {
+            if (rpmHold == null) return;
+            if (rpmHold.IsRunning)
+            {
+                rpmHold.Stop();
+                Debug.WriteLine("pCUE: RPM hold stopped (" + why + ").");
+            }
+        }
+        #endregion
+
+        #region Updates
+        //The bottom strip sits on the bright green end of the window gradient, where orange and
+        //lime wash out. Everything down there is plain white, with yellow reserved for "look at
+        //this" (update available, failure, lost signal).
+        static readonly System.Windows.Media.Brush UpdateInfoBrush = System.Windows.Media.Brushes.White;
+        static readonly System.Windows.Media.Brush UpdateAlertBrush = System.Windows.Media.Brushes.Yellow;
+
+        //Manual check. Reports the outcome inline and, when a newer build exists, offers to
+        //download it. Nothing is ever downloaded or launched without the user saying so.
+        private async void Update_Check_Button_Click(object sender, RoutedEventArgs e)
+        {
+            await RunUpdateCheck(true);
+        }
+
+        private void Update_On_Start_Changed(object sender, RoutedEventArgs e)
+        {
+            Properties.Settings.Default.Update_Check_On_Start = Update_On_Start_CheckBox.IsChecked == true;
+            Properties.Settings.Default.Save();
+        }
+
+        //Shared by the button and the optional start-up check. When interactive is false this only
+        //reports (start-up must never pop dialogs); when true it may offer the download.
+        private async Task RunUpdateCheck(bool interactive)
+        {
+            if (updateService == null) return;
+
+            if (interactive) Update_Check_Button.IsEnabled = false;
+            SetUpdateStatus("Checking for updates...", UpdateInfoBrush);
+
+            try
+            {
+                AppUpdateInfo info = await updateService
+                    .CheckAsync(Properties.Settings.Default.Update_Manifest_Url);
+
+                switch (info.State)
+                {
+                    case UpdateCheckState.UpToDate:
+                        SetUpdateStatus(info.Message, UpdateInfoBrush);
+                        break;
+
+                    case UpdateCheckState.UpdateAvailable:
+                        SetUpdateStatus(info.Message, UpdateAlertBrush);
+                        if (interactive) await OfferUpdate(info);
+                        break;
+
+                    default:
+                        SetUpdateStatus(info.Message, UpdateAlertBrush);
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("pCUE: update check failed: " + ex.Message);
+                SetUpdateStatus("Update check failed: " + ex.Message, UpdateAlertBrush);
+            }
+            finally
+            {
+                if (interactive) Update_Check_Button.IsEnabled = true;
+            }
+        }
+
+        //Download (verified) then, after a second explicit confirmation, launch the installer and
+        //close pCUE - a running app cannot overwrite its own files.
+        private async Task OfferUpdate(AppUpdateInfo info)
+        {
+            MessageBoxResult wants = MessageBox.Show(
+                info.Message + "\n\nDownload it now?",
+                "pCUE update available", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (wants != MessageBoxResult.Yes) return;
+
+            string installer;
+            try
+            {
+                var progress = new Progress<string>(text => SetUpdateStatus(text, UpdateInfoBrush));
+                installer = await updateService.DownloadVerifiedInstallerAsync(info, progress);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("pCUE: update download failed: " + ex.Message);
+                SetUpdateStatus("Download failed: " + ex.Message, UpdateAlertBrush);
+                MessageBox.Show(ex.Message, "pCUE update", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            SetUpdateStatus("Downloaded and verified pCUE " + info.AvailableVersion + ".", UpdateInfoBrush);
+
+            MessageBoxResult install = MessageBox.Show(
+                "pCUE " + info.AvailableVersion + " was downloaded and its checksum verified.\n\n" +
+                "pCUE must close so the installer can replace its files. Run the installer now?",
+                "Install update", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (install != MessageBoxResult.Yes)
+            {
+                SetUpdateStatus("Installer saved to " + installer, UpdateAlertBrush);
+                return;
+            }
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(installer) { UseShellExecute = true });
+                suppressCloseConfirm = true;    //the user already confirmed; skip "Really close?"
+                Application.Current.Shutdown();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("pCUE: could not launch installer: " + ex.Message);
+                SetUpdateStatus("Could not launch the installer: " + ex.Message, UpdateAlertBrush);
+            }
+        }
+
+        private void SetUpdateStatus(string text, System.Windows.Media.Brush brush)
+        {
+            Update_Status_Label.Text = text;
+            Update_Status_Label.Foreground = brush;
+            Update_Status_Label.ToolTip = text;   //full text on hover; the label trims with ellipsis
+        }
+        #endregion
+
         #region Bench Tachometer (external USB-HID)
         //Connect / disconnect the external bench tachometer.
         private void Tach_Connect_Button_Click(object sender, RoutedEventArgs e)
@@ -1387,8 +1699,8 @@ namespace pCUE
             catch (Exception ex)
             {
                 Debug.WriteLine("pCUE: tach connect/disconnect failed: " + ex.Message);
-                Tach_Status_Label.Text = "● Tach not found";
-                Tach_Status_Label.Foreground = System.Windows.Media.Brushes.Orange;
+                Tach_Status_Label.Text = "● Not found";
+                Tach_Status_Label.Foreground = UpdateAlertBrush;   //yellow, not orange - orange is unreadable down here
                 MessageBox.Show(ex.Message, "Bench Tachometer", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
@@ -1401,19 +1713,37 @@ namespace pCUE
             tachAssignedChannel = (sel >= 1 && sel <= 6) ? (sel - 1) : -1;
         }
 
-        //Live RPM readout + battery flag (raised from the tach's background read thread).
-        private void Bench_Tach_ReadingChanged(object sender, TachoReadingEventArgs e)
+        //Refresh the tach panel from the SAME freshness rule the fan column uses (ReadRpm() returns
+        //null once a reading is older than StalenessMs). Driven by the 500 ms UI timer rather than
+        //the driver's ReadingChanged event, because that event only fires on a successful decode:
+        //a tachometer that is still enumerated but has stopped sending frames (auto power-off,
+        //blocked beam) would otherwise leave the last RPM on screen forever, contradicting the fan
+        //column and inviting the operator to record a dead instrument's reading.
+        private void Update_Tach_Panel()
         {
-            TachoReading reading = e.Reading;
-            try
+            if (bench_tach == null || Tach_RPM_Readout == null) return;
+
+            if (!bench_tach.IsConnected)
             {
-                Dispatcher.BeginInvoke(new Action(delegate
-                {
-                    Tach_RPM_Readout.Text = Math.Round(reading.Rpm).ToString();
-                    Tach_Battery_Label.Visibility = reading.BatteryLow ? Visibility.Visible : Visibility.Collapsed;
-                }));
+                Tach_RPM_Readout.Text = "----";
+                Tach_Battery_Label.Visibility = Visibility.Collapsed;
+                return;
             }
-            catch (Exception ex) { Debug.WriteLine("pCUE: tach reading UI dispatch failed: " + ex.Message); }
+
+            double? rpm = bench_tach.ReadRpm();
+            if (rpm.HasValue)
+            {
+                Tach_RPM_Readout.Text = Math.Round(rpm.Value).ToString();
+                Tach_RPM_Readout.Foreground = UpdateInfoBrush;
+                Tach_Battery_Label.Visibility = bench_tach.BatteryLow ? Visibility.Visible : Visibility.Collapsed;
+            }
+            else
+            {
+                //Connected but no fresh frame - say so instead of showing a stale number.
+                Tach_RPM_Readout.Text = "no signal";
+                Tach_RPM_Readout.Foreground = UpdateAlertBrush;
+                Tach_Battery_Label.Visibility = Visibility.Collapsed;
+            }
         }
 
         //Connection state -> update the button caption and status line.
@@ -1424,13 +1754,15 @@ namespace pCUE
                 Dispatcher.BeginInvoke(new Action(delegate
                 {
                     Tach_Connect_Button.Content = connected ? "Disconnect" : "Connect Tach";
-                    Tach_Status_Label.Text = connected ? "● Tach connected" : "● Tach off";
+                    //Same wording and colours as the Commander PRO status line above.
+                    Tach_Status_Label.Text = connected ? "● Connected" : "● Disconnected";
                     Tach_Status_Label.Foreground = connected
                         ? System.Windows.Media.Brushes.Lime
                         : System.Windows.Media.Brushes.Gainsboro;
                     if (!connected)
                     {
                         Tach_RPM_Readout.Text = "----";
+                        Tach_RPM_Readout.Foreground = UpdateInfoBrush;
                         Tach_Battery_Label.Visibility = Visibility.Collapsed;
                     }
                 }));

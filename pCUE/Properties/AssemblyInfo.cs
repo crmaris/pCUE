@@ -54,7 +54,8 @@ using System.Windows;
 //
 // AssemblyVersion is kept stable on purpose: it is the identity the runtime and the
 // per-user Properties.Settings store key off, so bumping it every build would lose the
-// user's saved settings. The build-time revision bump (see pCUE.csproj) only advances
-// the *file* version below, whose 4th component (Revision) increments on each compile.
+// user's saved settings. The build-time bump (see pCUE.csproj) only advances the *file*
+// version below, in +0.1 steps: 1.3.1 -> 1.3.2 -> 1.3.3 ... Keep it THREE components;
+// the bump task will not touch a four-part value.
 [assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.3.0.17")]
+[assembly: AssemblyFileVersion("1.3.2")]

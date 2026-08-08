@@ -5,7 +5,7 @@
         xmlns:system="clr-namespace:System;assembly=mscorlib"
         xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"      
     
-    Title="pCUE - Cybenetics LTD - v.1.4" Height="525" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
+    Title="pCUE - Cybenetics LTD" Height="595" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
 
     <Window.Background>
         <LinearGradientBrush EndPoint="0.5,1" StartPoint="0.5,0">
@@ -23,7 +23,7 @@
         </x:ArrayExtension>
     </Window.Resources>
 
-    <Grid x:Name="Main_Window" Margin="0,0,3.4,0" Height="492" VerticalAlignment="Top">
+    <Grid x:Name="Main_Window" Margin="0,0,3.4,0" Height="562" VerticalAlignment="Top">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="51*"/>
             <ColumnDefinition Width="86*"/>
@@ -100,31 +100,31 @@
                 <ColumnDefinition Width="256*"/>
                 <ColumnDefinition Width="263*"/>
             </Grid.ColumnDefinitions>
-            <Label Content="Fan #2" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,39,0,0" VerticalAlignment="Top" Height="25"/>
-            <Label Content="Fan #3" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,66,0,0" VerticalAlignment="Top" Height="25"/>
             <Label Content="Fan #1" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,11,0,0" VerticalAlignment="Top" Height="25"/>
-            <Label Content="Fan #5" Style="{StaticResource White_Labels}" Margin="10,119,200,36" HorizontalAlignment="Left"/>
-            <Label Content="Fan #6" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,147,0,0" VerticalAlignment="Top" Height="25"/>
+            <Label Content="Fan #2" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,38,0,0" VerticalAlignment="Top" Height="25"/>
+            <Label Content="Fan #3" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,65,0,0" VerticalAlignment="Top" Height="25"/>
             <Label Content="Fan #4" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,92,0,0" VerticalAlignment="Top" Height="25"/>
+            <Label Content="Fan #5" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,119,0,0" VerticalAlignment="Top" Height="25"/>
+            <Label Content="Fan #6" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,146,0,0" VerticalAlignment="Top" Height="25"/>
             <NumericUpDownLib:UIntegerUpDown x:Name="Fan1_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,11,0,0" NumberStyle="Integer" ValueChanged="Fan_Numeric_ValueChanged"/>
-            <NumericUpDownLib:UIntegerUpDown x:Name="Fan2_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,39,0,0" NumberStyle="Integer" ValueChanged="Fan_Numeric_ValueChanged"/>
-            <NumericUpDownLib:UIntegerUpDown x:Name="Fan3_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,66,0,0" NumberStyle="Integer" ValueChanged="Fan_Numeric_ValueChanged"/>
+            <NumericUpDownLib:UIntegerUpDown x:Name="Fan2_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,38,0,0" NumberStyle="Integer" ValueChanged="Fan_Numeric_ValueChanged"/>
+            <NumericUpDownLib:UIntegerUpDown x:Name="Fan3_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,65,0,0" NumberStyle="Integer" ValueChanged="Fan_Numeric_ValueChanged"/>
             <NumericUpDownLib:UIntegerUpDown x:Name="Fan4_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,92,0,0" NumberStyle="Integer" ValueChanged="Fan_Numeric_ValueChanged"/>
             <NumericUpDownLib:UIntegerUpDown x:Name="Fan5_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,119,0,0" NumberStyle="Integer" ValueChanged="Fan_Numeric_ValueChanged"/>
-            <NumericUpDownLib:UIntegerUpDown x:Name="Fan6_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,147,0,0" NumberStyle="Integer"/>
+            <NumericUpDownLib:UIntegerUpDown x:Name="Fan6_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" ForceCursor="True" IsReadOnly="False" MaxValue="3500" ClipToBounds="True" Height="23" Margin="61,146,0,0" NumberStyle="Integer" ValueChanged="Fan_Numeric_ValueChanged"/>
             <Slider x:Name="Fan1_Slider" HorizontalAlignment="Left" Margin="130,16,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
-            <Slider x:Name="Fan2_Slider" HorizontalAlignment="Left" Margin="130,44,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
-            <Slider x:Name="Fan3_Slider" HorizontalAlignment="Left" Margin="130,69,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
+            <Slider x:Name="Fan2_Slider" HorizontalAlignment="Left" Margin="130,43,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
+            <Slider x:Name="Fan3_Slider" HorizontalAlignment="Left" Margin="130,70,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
             <Slider x:Name="Fan4_Slider" HorizontalAlignment="Left" Margin="130,97,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
-            <Slider x:Name="Fan5_Slider" HorizontalAlignment="Left" Margin="130,119,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
-            <Slider x:Name="Fan6_Slider" HorizontalAlignment="Left" Margin="130,147,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
+            <Slider x:Name="Fan5_Slider" HorizontalAlignment="Left" Margin="130,124,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
+            <Slider x:Name="Fan6_Slider" HorizontalAlignment="Left" Margin="130,151,0,0" VerticalAlignment="Top" Grid.ColumnSpan="2" Width="188" Maximum="3500" LargeChange="10" SmallChange="1" ValueChanged="Fan_Slider_ValueChanged"/>
 
             <ComboBox x:Name="Combo1" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,14,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
-            <ComboBox x:Name="Combo2" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,40,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
-            <ComboBox x:Name="Combo3" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,66,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
-            <ComboBox x:Name="Combo4" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,92,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
-            <ComboBox x:Name="Combo5" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,119,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
-            <ComboBox x:Name="Combo6" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,146,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
+            <ComboBox x:Name="Combo2" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,41,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
+            <ComboBox x:Name="Combo3" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,68,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
+            <ComboBox x:Name="Combo4" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,95,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
+            <ComboBox x:Name="Combo5" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,122,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
+            <ComboBox x:Name="Combo6" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,149,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
             <CheckBox x:Name="Sync_Fans_CheckBox" Content="Sync" Grid.Column="1" HorizontalAlignment="Left" Margin="160.4,21,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" ToolTip="Syncs all fans with fan #1"/>
             <Label Content="Status:" Style="{StaticResource White_Labels}" Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="160.4,42,0,0" Height="25"/>
             <TextBlock x:Name="Status_Label" Grid.Column="1" Text="● Disconnected" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="160.4,61,0,0" Width="130" Height="34" TextWrapping="Wrap" FontWeight="Bold" Foreground="#FFE0E5C8"/>
@@ -137,8 +137,8 @@
         <CheckBox x:Name="autostartCheckBox" Content="Auto Start" HorizontalAlignment="Left" Margin="10,164,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" Background="#FFF5E242" Checked="Autostart" Unchecked="Autostart"/>
         <TextBox x:Name="Commander_SN" HorizontalAlignment="Left" Height="23" Margin="123,184,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Background="#FF15743E" Foreground="#FFF6F1F1" Grid.ColumnSpan="2"/>
         <Label Content="Commander SN:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,184,0,0" VerticalAlignment="Top" Height="25"/>
-        <GroupBox x:Name="Tach_Box" Header="Bench Tachometer (external, for fans without a Commander tach wire)" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,412,0,0" Height="72" Width="594" Grid.ColumnSpan="2">
-            <Grid x:Name="Tach_Grid" HorizontalAlignment="Left" VerticalAlignment="Top" Height="52" Width="584">
+        <GroupBox x:Name="Tach_Box" Header="Bench Tachometer + closed-loop RPM hold (for fans the Commander cannot regulate by RPM)" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,412,0,0" Height="104" Width="594" Grid.ColumnSpan="2">
+            <Grid x:Name="Tach_Grid" HorizontalAlignment="Left" VerticalAlignment="Top" Height="84" Width="584">
                 <Button x:Name="Tach_Connect_Button" Content="Connect Tach" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6,10,0,0" Width="96" Height="24" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Tach_Connect_Button_Click"/>
                 <Label Content="Assign:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="112,9,0,0" Height="25"/>
                 <ComboBox x:Name="Tach_Fan_Assign" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="164,11,0,0" Width="76" SelectionChanged="Tach_Fan_Assign_SelectionChanged">
@@ -151,10 +151,29 @@
                     <ComboBoxItem Content="Fan #6"/>
                 </ComboBox>
                 <Label Content="RPM:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="252,9,0,0" Height="25"/>
-                <TextBlock x:Name="Tach_RPM_Readout" Text="----" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="296,12,0,0" Width="60" FontWeight="Bold" Foreground="#FFE0E5C8"/>
-                <TextBlock x:Name="Tach_Status_Label" Text="● Tach off" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="366,12,0,0" Width="120" FontWeight="Bold" Foreground="#FFD3D3D3"/>
-                <TextBlock x:Name="Tach_Battery_Label" Text="BATT LOW" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="492,12,0,0" Width="80" FontWeight="Bold" Foreground="#FFFB2706" Visibility="Collapsed"/>
+                <TextBlock x:Name="Tach_RPM_Readout" Text="----" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="296,12,0,0" Width="60" FontWeight="Bold" Foreground="White"/>
+                <Label Content="Status:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="358,9,0,0" Height="25"/>
+                <TextBlock x:Name="Tach_Status_Label" Text="● Disconnected" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="410,12,0,0" Width="110" FontWeight="Bold" Foreground="#FFE0E5C8"/>
+                <TextBlock x:Name="Tach_Battery_Label" Text="BATT LOW" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="492,12,0,0" Width="80" FontWeight="Bold" Foreground="Yellow" Visibility="Collapsed"/>
+
+                <Label Content="Hold fan:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6,42,0,0" Height="25"/>
+                <ComboBox x:Name="Hold_Fan_Select" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="72,44,0,0" Width="70" ToolTip="Which Commander fan channel the RPM hold drives">
+                    <ComboBoxItem Content="None" IsSelected="True"/>
+                    <ComboBoxItem Content="Fan #1"/>
+                    <ComboBoxItem Content="Fan #2"/>
+                    <ComboBoxItem Content="Fan #3"/>
+                    <ComboBoxItem Content="Fan #4"/>
+                    <ComboBoxItem Content="Fan #5"/>
+                    <ComboBoxItem Content="Fan #6"/>
+                </ComboBox>
+                <Label Content="Target RPM:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="148,42,0,0" Height="25"/>
+                <NumericUpDownLib:UIntegerUpDown x:Name="Hold_Target_Numeric" HorizontalAlignment="Left" VerticalAlignment="Top" DisplayLength="4" IsReadOnly="False" MinValue="0" MaxValue="3500" Value="800" ClipToBounds="True" Height="23" Margin="228,44,0,0" NumberStyle="Integer" ValueChanged="Hold_Target_ValueChanged"/>
+                <Button x:Name="Hold_Start_Button" Content="Hold RPM" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="298,44,0,0" Width="78" Height="23" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Hold_Start_Button_Click"/>
+                <TextBlock x:Name="Hold_Status_Label" Text="" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="384,47,0,0" Width="196" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="White"/>
             </Grid>
         </GroupBox>
+        <Button x:Name="Update_Check_Button" Content="Check for Updates" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="23,524,0,0" Width="120" Height="24" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Update_Check_Button_Click"/>
+        <CheckBox x:Name="Update_On_Start_CheckBox" Content="On start" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="153,529,0,0" Foreground="#FFF5EFEF" ToolTip="Check for a newer pCUE version when the app starts (checks only - never installs on its own)" Checked="Update_On_Start_Changed" Unchecked="Update_On_Start_Changed"/>
+        <TextBlock x:Name="Update_Status_Label" Grid.ColumnSpan="2" Text="" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="225,529,0,0" Width="379" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="White"/>
     </Grid>
 </Window>

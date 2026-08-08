@@ -46,5 +46,29 @@ namespace pCUE.Properties {
                 this["AVG_Values"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("True")]
+        public bool Update_Check_On_Start {
+            get {
+                return ((bool)(this["Update_Check_On_Start"]));
+            }
+            set {
+                this["Update_Check_On_Start"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string Update_Manifest_Url {
+            get {
+                return ((string)(this["Update_Manifest_Url"]));
+            }
+            set {
+                this["Update_Manifest_Url"] = value;
+            }
+        }
     }
 }
