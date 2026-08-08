@@ -154,7 +154,13 @@ namespace pCUE
         List<ComboBox> Fan_Mode_Controls = new List<ComboBox>();
 
         //Give time to form to load properly timer
-        System.Windows.Threading.DispatcherTimer oneShot = new System.Windows.Threading.DispatcherTimer();       
+        System.Windows.Threading.DispatcherTimer oneShot = new System.Windows.Threading.DispatcherTimer();
+
+        //External bench tachometer (USB-HID, VID 0x1A86 / PID 0xE008). Connected on demand from the
+        //Tachometer panel. When assigned to a fan channel it overrides that fan's displayed RPM with
+        //the tach reading; when the tach signal is stale/lost it falls back to the Commander PRO value.
+        HidTachometer bench_tach;
+        volatile int tachAssignedChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
 
         public MainWindow()
         {
@@ -180,6 +186,11 @@ namespace pCUE
             thisComputer = new Computer() { IsCpuEnabled = true };
             try { thisComputer.Open(); }
             catch (Exception ex) { Debug.WriteLine("pCUE: LibreHardwareMonitor open failed: " + ex.Message); }
+
+            //External bench tachometer - created here, opened only when the user clicks Connect.
+            bench_tach = new HidTachometer();
+            bench_tach.ReadingChanged += Bench_Tach_ReadingChanged;
+            bench_tach.ConnectionChanged += Bench_Tach_ConnectionChanged;
         }
 
         #region Main Window Functions
@@ -219,6 +230,10 @@ namespace pCUE
             //release the LibreHardwareMonitor session (unloads its kernel driver)
             try { thisComputer?.Close(); }
             catch (Exception ex) { Debug.WriteLine("pCUE: LibreHardwareMonitor close failed: " + ex.Message); }
+
+            //release the external bench tachometer (stops its read thread, closes the HID stream)
+            try { bench_tach?.Dispose(); }
+            catch (Exception ex) { Debug.WriteLine("pCUE: tach dispose failed: " + ex.Message); }
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -382,6 +397,16 @@ namespace pCUE
 
                             fanPollErrorLogged = false;
                             consecutivePollFailures = 0;
+
+                            //External bench tachometer override: for the assigned fan, replace the
+                            //Commander PRO reading with the tach's RPM when it is fresh; if the tach
+                            //signal is stale/lost (ReadRpm() == null) keep the Commander value.
+                            int tachCh = tachAssignedChannel;
+                            if (tachCh >= 0 && tachCh < 6 && bench_tach != null && bench_tach.IsConnected)
+                            {
+                                double? tachRpm = bench_tach.ReadRpm();
+                                if (tachRpm.HasValue) rpms[tachCh] = (int)Math.Round(tachRpm.Value);
+                            }
 
                             if (!token.IsCancellationRequested)
                             {
@@ -1348,6 +1373,71 @@ namespace pCUE
                     Commander_Pro_Set_Fan_Speed(fan, fan_speed);                 
                 }                          
         }      
+
+        #region Bench Tachometer (external USB-HID)
+        //Connect / disconnect the external bench tachometer.
+        private void Tach_Connect_Button_Click(object sender, RoutedEventArgs e)
+        {
+            if (bench_tach == null) return;
+            try
+            {
+                if (!bench_tach.IsConnected) bench_tach.Connect();   //ConnectionChanged updates the UI
+                else bench_tach.Disconnect();
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine("pCUE: tach connect/disconnect failed: " + ex.Message);
+                Tach_Status_Label.Text = "● Tach not found";
+                Tach_Status_Label.Foreground = System.Windows.Media.Brushes.Orange;
+                MessageBox.Show(ex.Message, "Bench Tachometer", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        //Choose which fan the tachometer feeds. Index 0 = None; 1..6 = Fan #1..#6.
+        //Read from the sender so an early SelectionChanged (during XAML init) can't NRE on the field.
+        private void Tach_Fan_Assign_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            int sel = ((ComboBox)sender).SelectedIndex;
+            tachAssignedChannel = (sel >= 1 && sel <= 6) ? (sel - 1) : -1;
+        }
+
+        //Live RPM readout + battery flag (raised from the tach's background read thread).
+        private void Bench_Tach_ReadingChanged(object sender, TachoReadingEventArgs e)
+        {
+            TachoReading reading = e.Reading;
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    Tach_RPM_Readout.Text = Math.Round(reading.Rpm).ToString();
+                    Tach_Battery_Label.Visibility = reading.BatteryLow ? Visibility.Visible : Visibility.Collapsed;
+                }));
+            }
+            catch (Exception ex) { Debug.WriteLine("pCUE: tach reading UI dispatch failed: " + ex.Message); }
+        }
+
+        //Connection state -> update the button caption and status line.
+        private void Bench_Tach_ConnectionChanged(object sender, bool connected)
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    Tach_Connect_Button.Content = connected ? "Disconnect" : "Connect Tach";
+                    Tach_Status_Label.Text = connected ? "● Tach connected" : "● Tach off";
+                    Tach_Status_Label.Foreground = connected
+                        ? System.Windows.Media.Brushes.Lime
+                        : System.Windows.Media.Brushes.Gainsboro;
+                    if (!connected)
+                    {
+                        Tach_RPM_Readout.Text = "----";
+                        Tach_Battery_Label.Visibility = Visibility.Collapsed;
+                    }
+                }));
+            }
+            catch (Exception ex) { Debug.WriteLine("pCUE: tach connection UI dispatch failed: " + ex.Message); }
+        }
+        #endregion
 
         private void Startup(bool add)
         {

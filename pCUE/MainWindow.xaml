@@ -5,7 +5,7 @@
         xmlns:system="clr-namespace:System;assembly=mscorlib"
         xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"      
     
-    Title="pCUE - Cybenetics LTD - v.1.4" Height="450" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
+    Title="pCUE - Cybenetics LTD - v.1.4" Height="525" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
 
     <Window.Background>
         <LinearGradientBrush EndPoint="0.5,1" StartPoint="0.5,0">
@@ -23,7 +23,7 @@
         </x:ArrayExtension>
     </Window.Resources>
 
-    <Grid x:Name="Main_Window" Margin="0,0,3.4,0" Height="417" VerticalAlignment="Top">
+    <Grid x:Name="Main_Window" Margin="0,0,3.4,0" Height="492" VerticalAlignment="Top">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="51*"/>
             <ColumnDefinition Width="86*"/>
@@ -126,6 +126,8 @@
             <ComboBox x:Name="Combo5" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,119,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
             <ComboBox x:Name="Combo6" ItemsSource="{StaticResource Combobox_Items}" Grid.Column="1" HorizontalAlignment="Left" Margin="67,146,0,0" VerticalAlignment="Top" Width="71" SelectionChanged="Commander_Pro_Set_Fan_Connection_Mode"/>
             <CheckBox x:Name="Sync_Fans_CheckBox" Content="Sync" Grid.Column="1" HorizontalAlignment="Left" Margin="160.4,21,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" ToolTip="Syncs all fans with fan #1"/>
+            <Label Content="Status:" Style="{StaticResource White_Labels}" Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="160.4,42,0,0" Height="25"/>
+            <TextBlock x:Name="Status_Label" Grid.Column="1" Text="● Disconnected" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="160.4,61,0,0" Width="130" Height="34" TextWrapping="Wrap" FontWeight="Bold" Foreground="#FFE0E5C8"/>
             <Button x:Name="Set_Fan_Speed" Content="Set Speed" Grid.Column="1" HorizontalAlignment="Left" Margin="160.4,97,0,0" VerticalAlignment="Top" Width="75" Background="#FF3806FB" Foreground="#FFF7FBF7" Click="Set_Fan_Speed_Click"/>
             <Button x:Name="Open_Corsair_Commander" Content="Open" Grid.Column="1" HorizontalAlignment="Left" Margin="160.4,132,0,0" VerticalAlignment="Top" Width="75" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Open_Corsair_Commander_Click"/>
 
@@ -135,7 +137,24 @@
         <CheckBox x:Name="autostartCheckBox" Content="Auto Start" HorizontalAlignment="Left" Margin="10,164,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" Background="#FFF5E242" Checked="Autostart" Unchecked="Autostart"/>
         <TextBox x:Name="Commander_SN" HorizontalAlignment="Left" Height="23" Margin="123,184,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Background="#FF15743E" Foreground="#FFF6F1F1" Grid.ColumnSpan="2"/>
         <Label Content="Commander SN:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,184,0,0" VerticalAlignment="Top" Height="25"/>
-        <Label Content="Status:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="508,309,0,0" VerticalAlignment="Top" Height="25" Grid.ColumnSpan="2"/>
-        <TextBlock x:Name="Status_Label" Grid.ColumnSpan="2" Text="● Disconnected" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="510,330,0,0" Width="92" Height="66" TextWrapping="Wrap" TextAlignment="Center" FontWeight="Bold" Foreground="#FFE0E5C8"/>
+        <GroupBox x:Name="Tach_Box" Header="Bench Tachometer (external, for fans without a Commander tach wire)" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="10,412,0,0" Height="72" Width="594" Grid.ColumnSpan="2">
+            <Grid x:Name="Tach_Grid" HorizontalAlignment="Left" VerticalAlignment="Top" Height="52" Width="584">
+                <Button x:Name="Tach_Connect_Button" Content="Connect Tach" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="6,10,0,0" Width="96" Height="24" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Tach_Connect_Button_Click"/>
+                <Label Content="Assign:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="112,9,0,0" Height="25"/>
+                <ComboBox x:Name="Tach_Fan_Assign" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="164,11,0,0" Width="76" SelectionChanged="Tach_Fan_Assign_SelectionChanged">
+                    <ComboBoxItem Content="None" IsSelected="True"/>
+                    <ComboBoxItem Content="Fan #1"/>
+                    <ComboBoxItem Content="Fan #2"/>
+                    <ComboBoxItem Content="Fan #3"/>
+                    <ComboBoxItem Content="Fan #4"/>
+                    <ComboBoxItem Content="Fan #5"/>
+                    <ComboBoxItem Content="Fan #6"/>
+                </ComboBox>
+                <Label Content="RPM:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="252,9,0,0" Height="25"/>
+                <TextBlock x:Name="Tach_RPM_Readout" Text="----" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="296,12,0,0" Width="60" FontWeight="Bold" Foreground="#FFE0E5C8"/>
+                <TextBlock x:Name="Tach_Status_Label" Text="● Tach off" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="366,12,0,0" Width="120" FontWeight="Bold" Foreground="#FFD3D3D3"/>
+                <TextBlock x:Name="Tach_Battery_Label" Text="BATT LOW" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="492,12,0,0" Width="80" FontWeight="Bold" Foreground="#FFFB2706" Visibility="Collapsed"/>
+            </Grid>
+        </GroupBox>
     </Grid>
 </Window>
