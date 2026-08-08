@@ -69,6 +69,15 @@ namespace pCUE
         /// still RISING 1605->1870).
         /// </summary>
         public int SettleDelayMs { get; set; } = 4000;
+        /// <summary>
+        /// Floor for the settle wait, used after the smallest moves. A 1% nudge is mechanically
+        /// almost instant, so what actually has to be waited out is the handheld meter's own
+        /// refresh - measured at 1873 ms median / 2145 ms worst on the bench unit, hence 2500.
+        /// Going below the meter's refresh does not read a fresh value, it re-reads the old one.
+        /// </summary>
+        public int MinSettleDelayMs { get; set; } = 2500;
+        /// <summary>Added to MinSettleDelayMs per extra duty point moved, up to SettleDelayMs.</summary>
+        public int SettleMsPerDutyPercent { get; set; } = 450;
         public int StabilizationTimeMs { get; set; } = 3000;
         /// <summary>Max time to first Stable. 0 disables.</summary>
         public int TimeoutMs { get; set; } = 120000;
@@ -183,6 +192,16 @@ namespace pCUE
             // a dead sensor: if we still had RPM at a higher duty, the silence is our own doing.
             int lastGoodDuty = -1;
 
+            // Learned response of THIS fan, in RPM per 1% duty. Every step costs a settle wait, so
+            // stepping a blind 1% at a time is most of the wall-clock. Knowing the slope turns a
+            // walk into a jump: 318 -> 400 RPM was two steps, and is one once the slope is known.
+            // Seeded from the fan's own operating point on the first reading (rpm/duty is a decent
+            // approximation - this fan measures 23-30 RPM/% from 12% all the way to 100%), then
+            // refined from each move actually made.
+            double rpmPerDuty = 0;
+            int lastStepDuty = -1;      // duty before the last move, -1 once consumed
+            double lastStepRpm = 0;     // filtered RPM before the last move
+
             string stopReason = "stopped";
             bool faulted = false;
 
@@ -271,6 +290,24 @@ namespace pCUE
                     invalidCount = 0;
                     lastGoodDuty = duty;
                     double filtered = AddSample(samples, raw.Value, cfg.RpmFilterWindow);
+
+                    // Learn from the move just completed. Only whole-percent duties exist, so this
+                    // is coarse by nature; average it with what we knew so a single noisy reading
+                    // cannot swing the next step, and reject nonsense outright.
+                    if (lastStepDuty >= 0 && duty != lastStepDuty)
+                    {
+                        double observed = (filtered - lastStepRpm) / (duty - lastStepDuty);
+                        if (observed > 2 && observed < 200)
+                            rpmPerDuty = rpmPerDuty > 0 ? (rpmPerDuty + observed) / 2 : observed;
+                        lastStepDuty = -1;
+                    }
+                    else if (rpmPerDuty <= 0 && duty > 0 && filtered > 0)
+                    {
+                        // No move measured yet - seed from where the fan is sitting.
+                        double seed = filtered / duty;
+                        if (seed > 2 && seed < 200) rpmPerDuty = seed;
+                    }
+
                     double error = target - filtered;
                     double absError = Math.Abs(error);
 
@@ -312,11 +349,30 @@ namespace pCUE
                     // --- out of tolerance: step ---
                     inToleranceSince = null;
 
-                    bool fineRegion = absError <= cfg.CoarseErrorThreshold;
                     int direction = Math.Sign(error);       // >0 need more RPM
                     SetStatus(everStable ? FanHoldStatus.Correcting : FanHoldStatus.Ramping);
 
-                    int step = fineRegion ? cfg.FineDutyStep : cfg.CoarseDutyStep;
+                    // Size the step from the measured response when we have one. Clamped both ways:
+                    // never below the fine step (a momentarily steep slope would round to 0 and
+                    // stall the loop), and never beyond a coarse step (a bad estimate must not be
+                    // able to fling the fan across its range - the loop corrects on the next pass).
+                    int step;
+                    if (rpmPerDuty > 0)
+                    {
+                        step = (int)Math.Round(absError / rpmPerDuty);
+                        // Capped at the existing coarse step, NOT beyond it: the settle wait tops
+                        // out at SettleDelayMs, which was tuned for a 5% move, so a bigger jump
+                        // would be under-settled and that is exactly how this loop used to
+                        // oscillate. Speed here comes from taking the RIGHT step and waiting the
+                        // right amount, not from taking wilder ones.
+                        step = Clamp(step, cfg.FineDutyStep, cfg.CoarseDutyStep);
+                    }
+                    else
+                    {
+                        step = absError <= cfg.CoarseErrorThreshold ? cfg.FineDutyStep : cfg.CoarseDutyStep;
+                    }
+
+                    bool fineRegion = step <= cfg.FineDutyStep;
 
                     // At the finest step, a direction flip means the target sits between two whole
                     // duty values. Park on whichever was closer and stop hunting.
@@ -361,9 +417,20 @@ namespace pCUE
                         break;
                     }
 
+                    // Remember what we are moving FROM, so the next reading teaches us this fan's
+                    // RPM-per-percent rather than us guessing it again.
+                    lastStepDuty = duty;
+                    lastStepRpm = filtered;
+
+                    int moved = Math.Abs(newDuty - duty);
                     duty = newDuty;
                     ApplyDuty(duty);
-                    if (!await Delay(cfg.SettleDelayMs, ct)) break;
+
+                    // Scale the wait to how far we actually moved. A 1% nudge only has to outlast
+                    // the meter's refresh; a 5% jump has real mechanical settling to do on top.
+                    int settleMs = Clamp(cfg.MinSettleDelayMs + (moved - 1) * cfg.SettleMsPerDutyPercent,
+                                         cfg.MinSettleDelayMs, cfg.SettleDelayMs);
+                    if (!await Delay(settleMs, ct)) break;
 
                     //Throw away everything measured before/at the change. Without this the moving
                     //average blends pre-change and post-change readings, so the next error is
