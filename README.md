@@ -50,8 +50,39 @@ Tick **Remote** to expose an HTTP API for scripting or unattended benches.
 - Entering a token is what allows access from other machines, and every such request must present
   it. There is deliberately no way to expose fan control on the network unauthenticated.
 
-`GET /` lists the endpoints. `tools/pcue-cli.ps1` is a client that can also discover pCUE instances
-on the LAN.
+`GET /` lists the endpoints at runtime.
+
+### The CLI
+
+`tools/pcue-cli.ps1` drives every one of those endpoints, so anything you can do by clicking you
+can do from a script. `tools/pcue.cmd` is a shim if you would rather type `pcue` — put `tools/` on
+your PATH.
+
+```powershell
+pcue status                      # fans, tachometer, hold, CPU
+pcue watch                       # the same, refreshing
+pcue duty 2 45                   # fan 2 to 45% power   (duty all 30 does every fan)
+pcue mode 2 4pin                 # auto | 3pin | 4pin | disconnect
+pcue hold 2 1200                 # closed-loop hold at 1200 RPM
+pcue config tolerance 15         # tune the hold loop live
+pcue log 200                     # recent diagnostics
+pcue shot main ui.png            # PNG of the running UI
+pcue commands                    # every command, with examples
+```
+
+Point it at another machine with `-Server`, or set it once:
+
+```powershell
+$env:PCUE_SERVER = '192.168.1.20'
+$env:PCUE_TOKEN  = 'the-token-you-typed-in-the-app'
+```
+
+The token is read from the environment and **never written to disk**, matching the app, which does
+not persist it either. With no `-Server` and no `PCUE_SERVER`, the CLI tries localhost and then
+asks the LAN who is listening — `pcue discover` on its own lists what it finds.
+
+Add `-Json` to any command for raw output. Exit codes are meaningful, so a bench script can tell
+the cases apart: `0` success, `1` pCUE refused the request, `2` no pCUE reachable, `3` bad usage.
 
 ## Building
 
