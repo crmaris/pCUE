@@ -137,9 +137,14 @@ pCUE.exe --remote-prefix=http://+:5056/ --remote-token=SECRET --debug      # LAN
 - **Discovery** (`Remote/DiscoveryBeacon.cs`): a *passive* UDP responder on 5057 — it answers a
   `PCUE_DISCOVER` probe with app/version/host/url/requiresToken and is otherwise silent. It never
   returns the token.
-- **CLI:** `tools/pcue-cli.ps1` (discover, status, log, debug, duty, rpm, mode, hold, stop, open,
-  close, cpu-start/stop, tach-connect/disconnect, assign, reset, watch). `GET /` lists every
-  endpoint at runtime.
+- **CLI:** `tools/pcue-cli.ps1` reaches **every** endpoint; `tools/pcue.cmd` is a shim so it reads
+  as `pcue status`. `pcue commands` prints the lot. Host and token come from `PCUE_SERVER` /
+  `PCUE_TOKEN` so they are not retyped — and the token is **never written to disk**, matching the
+  app. With no server named it tries loopback, then LAN discovery. `-Json` on anything for raw
+  output. **Exit codes are load-bearing** — `0` ok, `1` pCUE refused, `2` nothing reachable,
+  `3` bad usage — so a bench script can tell "the app said no" from "the app was not there".
+  The old spellings (`debug`, `cpu-start/stop`, `tach-connect/disconnect`) are kept as aliases.
+  `GET /` lists every endpoint at runtime.
 
 ### Logging (`pCUE/Diagnostics/AppLog.cs`) — read this before adding diagnostics
 The rest of the app logs through `Debug.WriteLine`, which is `[Conditional("DEBUG")]` and therefore
@@ -227,6 +232,29 @@ expected and harmless, but it is the exact shape that made 1.4.1 declare a false
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-08-21 — Full CLI (no app change, no release)
+`tools/pcue-cli.ps1` rewritten to cover **every** endpoint. It previously reached about two thirds
+and never exposed `/hold/config` at all — the 13 tunables of the hold loop — nor `/log/clear`,
+`/log/level` or `/screenshot`. See the *Remote control* section above for the interface.
+
+- **Exit codes are the point**, not decoration: `0`/`1`/`2`/`3` separate success, a refusal by the
+  app, an unreachable app, and bad usage. A bench script needs that distinction; JSON on stdout
+  does not give it to them.
+- **Verified against a mock of the API, not against hardware** — the bench was powered off
+  (`192.168.1.20` did not even ping). Formatted and `-Json` output, every error path, all four exit
+  codes, the 401 refusal, the screenshot write, the `.cmd` shim and the legacy aliases were all
+  exercised. **The CLI has still never driven a real Commander PRO**; the endpoints underneath it
+  are unchanged and bench-proven, but its own paths through them are not.
+- **A real bug surfaced only because of that testing:** PowerShell 7 populates `$_.ErrorDetails`
+  even when a connection is *refused*, so a missing pCUE was reported as `pCUE: <message>` with
+  exit 1 — blaming the app for something it never said, and collapsing exactly the
+  unreachable-vs-refused distinction the exit codes exist for. The handler now keys off whether an
+  HTTP response object exists at all.
+- **No installer built and no release published**, deliberately: `pack-release.ps1` stages only the
+  app binaries, so a tools-only change would ship an identical app under a bumped version. This is
+  the one standing exception to the always-build rule — it does not apply when the app itself did
+  not change.
+
 ### 2026-08-08 — Tachometer decode: phantom zero and culture-sensitive parse (inherited bugs)
 
 Two defects found while working on the **Fan Control Application**, the app this driver was

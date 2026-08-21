@@ -400,6 +400,15 @@ pCUE CLI - every command
 
     'reset' { Out-Result (Invoke-Api '/reset?x=1' 'Post'); break }
 
+    # Spellings from the previous version of this script. Kept because bench scripts and the
+    # handover notes already use them, and silently breaking those to tidy up a command list
+    # would cost more than the two lines each.
+    'debug' { Out-Result (Invoke-Api '/log/level?value=debug'); break }
+    'cpu-start' { Out-Result (Invoke-Api '/cpu/start?x=1' 'Post'); break }
+    'cpu-stop' { Out-Result (Invoke-Api '/cpu/stop?x=1' 'Post'); break }
+    'tach-connect' { Out-Result (Invoke-Api '/tach/connect?x=1' 'Post'); break }
+    'tach-disconnect' { Out-Result (Invoke-Api '/tach/disconnect?x=1' 'Post'); break }
+
     'log' {
         $n = 100
         if ($Rest -and $Rest.Count -ge 1) { [void][int]::TryParse($Rest[0], [ref]$n) }
