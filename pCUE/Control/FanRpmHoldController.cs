@@ -76,6 +76,15 @@ namespace pCUE
         /// <summary>Kept short: a long window is extra lag in an already laggy loop.</summary>
         public int RpmFilterWindow { get; set; } = 3;
         public int MaxInvalidRpmSamples { get; set; } = 8;
+
+        /// <summary>
+        /// When true (default), reaching the 1% resolution limit does not park the loop - it
+        /// alternates between the two adjacent duties so the fan's INERTIA averages an effective
+        /// duty between whole-percent steps. Each leg gets the full SettleDelayMs, exactly as a
+        /// normal correction would; nothing about convergence timing changes. Set false to
+        /// restore the old "park on the closer duty" behaviour.
+        /// </summary>
+        public bool DitherEnabled { get; set; } = true;
     }
 
     /// <summary>
@@ -96,9 +105,11 @@ namespace pCUE
     ///
     /// One difference matters. That controller's actuator is a PSU voltage with millivolt
     /// resolution; ours is a whole-number percent, so the finest move is 1% duty - often 20-50 RPM
-    /// on a real fan. A tolerance tighter than one duty step is therefore unreachable, and a naive
-    /// loop would oscillate around the target forever. <see cref="ResolutionLimitReversals"/>
-    /// detects that bracketing and parks on the better of the two duties instead of hunting.
+    /// on a real fan. A tolerance tighter than one duty step is therefore unreachable, so when the
+    /// finest step keeps reversing, the loop DITHERS by default: it alternates between the two
+    /// adjacent duties (each for the full settle time) so the fan's inertia averages an effective
+    /// duty between whole-percent steps. With <see cref="FanHoldConfig.DitherEnabled"/> false it
+    /// parks on the closer duty instead, as it always did.
     ///
     /// Threading: the loop runs on a background Task. Events are raised from that thread, so
     /// subscribers must marshal to the UI thread.
@@ -179,6 +190,25 @@ namespace pCUE
             int bestDuty = duty;
             double bestAbsError = double.MaxValue;
 
+            // Sub-1% dithering. Engaged where the loop used to park: the target sits between two
+            // adjacent duties (ditherLo/ditherHi), so alternate between them and let the fan's
+            // inertia average an effective duty in between.
+            bool dithering = false;
+            int ditherLo = 0, ditherHi = 0;
+            // Consecutive windows spent outside the tolerance band while dithering. A couple is
+            // noise; sustained means the bracket no longer covers the target (drift or retarget)
+            // and normal stepping must take over.
+            int ditherOffBandWindows = 0;
+            const int DitherMaxOffBandWindows = 4;
+
+            // Detects a live retarget (UpdateTarget / holdConfig.TargetRpm changed under us):
+            // an old dither bracket is meaningless for a new target.
+            double lastSeenTarget = double.NaN;
+
+            // The last fine-step move's starting duty, so the bracket being flip-flopped is known
+            // when the resolution limit is declared.
+            int prevFineStepDuty = -1;
+
             // The last duty that actually produced a reading. Used to tell a stalled fan apart from
             // a dead sensor: if we still had RPM at a higher duty, the silence is our own doing.
             int lastGoodDuty = -1;
@@ -223,6 +253,21 @@ namespace pCUE
 
                     double target = GetTarget();
 
+                    // Live retarget: the setpoint changed under us. Any dither bracket and
+                    // fine-step reversal history belongs to the OLD target - drop them so the
+                    // loop converges on the new one instead of reporting Stable around it.
+                    if (!double.IsNaN(lastSeenTarget) && target != lastSeenTarget && dithering)
+                    {
+                        dithering = false;
+                        ditherOffBandWindows = 0;
+                        reversals = 0;
+                        lastFineDirection = 0;
+                        prevFineStepDuty = -1;
+                        AppLog.Info("HOLD retargeted to " + target.ToString("0") +
+                                    " RPM - dither bracket dropped, resuming steps");
+                    }
+                    lastSeenTarget = target;
+
                     double? raw;
                     try { raw = _readRpm(); }
                     catch (Exception ex)
@@ -250,8 +295,8 @@ namespace pCUE
                             faulted = true;
                             if (lastGoodDuty > duty)
                             {
+                                ApplyDuty(lastGoodDuty);
                                 duty = lastGoodDuty;
-                                ApplyDuty(duty);
                                 stopReason = "target is below this fan's minimum speed - backed off to " +
                                              duty + "%";
                             }
@@ -282,6 +327,62 @@ namespace pCUE
 
                     Emit(Status, raw, filtered, target, duty,
                          "err=" + error.ToString("+0;-0;0") + " RPM");
+
+                    // ---- sub-1% dither mode ---------------------------------------------------
+                    // Runs instead of the normal tolerance/step logic. Stay while genuinely near
+                    // the target; a bigger excursion hands control back to normal stepping.
+                    if (dithering)
+                    {
+                        // Exit immediately on a big excursion, and after a few CONSECUTIVE windows
+                        // merely outside tolerance - the latter covers drift/retarget cases where
+                        // both bracket legs are consistently off but not by 3x tolerance.
+                        if (absError > cfg.RpmTolerance * 3)
+                        {
+                            dithering = false;
+                            ditherOffBandWindows = 0;
+                            reversals = 0;
+                            lastFineDirection = 0;
+                            AppLog.Info("HOLD dither exited - error " + error.ToString("+0;-0;0") +
+                                        " RPM is outside the dither band; resuming normal steps");
+                            // fall through to the normal logic below
+                        }
+                        else if (absError > cfg.RpmTolerance &&
+                                 ++ditherOffBandWindows >= DitherMaxOffBandWindows)
+                        {
+                            dithering = false;
+                            ditherOffBandWindows = 0;
+                            reversals = 0;
+                            lastFineDirection = 0;
+                            AppLog.Info("HOLD dither exited after " + DitherMaxOffBandWindows +
+                                        " windows off-target (" + error.ToString("+0;-0;0") +
+                                        " RPM) - bracket no longer covers the target; resuming steps");
+                            // fall through to the normal logic below
+                        }
+                        else
+                        {
+                            if (absError <= cfg.RpmTolerance) ditherOffBandWindows = 0;
+
+                            // Need more RPM -> spend this window on the upper leg, less -> lower.
+                            // When the target truly sits between the two duties the error sign
+                            // alternates by itself and the average lands in between.
+                            // duty is updated TOGETHER with the hardware: a stale local value would
+                            // make the loop skip the write when the leg "matches" it again.
+                            int leg = error >= 0 ? ditherHi : ditherLo;
+                            if (leg != duty)
+                            {
+                                ApplyDuty(leg, quiet: true);
+                                duty = leg;
+                            }
+
+                            everStable = true;
+                            SetStatus(FanHoldStatus.Stable);
+                            Emit(FanHoldStatus.Stable, raw, filtered, target, duty,
+                                 "dithering " + ditherLo + "/" + ditherHi + "% for a sub-1% average");
+
+                            if (!await Delay(cfg.SettleDelayMs, ct)) break;
+                            continue;
+                        }
+                    }
 
                     // Timeout only applies until we first stabilize.
                     if (!everStable && cfg.TimeoutMs > 0 && overall.ElapsedMilliseconds > cfg.TimeoutMs)
@@ -334,7 +435,33 @@ namespace pCUE
 
                         if (nearEnough && reversals >= ResolutionLimitReversals)
                         {
-                            if (duty != bestDuty) { duty = bestDuty; ApplyDuty(duty); }
+                            // The bracket is the two adjacent duties the finest step has been
+                            // flip-flopping between. Fall back to bestDuty if it was never captured.
+                            int lo = prevFineStepDuty >= 0 ? Math.Min(duty, prevFineStepDuty) : bestDuty;
+                            int hi = prevFineStepDuty >= 0 ? Math.Max(duty, prevFineStepDuty) : Math.Min(bestDuty + 1, cfg.MaxDuty);
+                            lo = Clamp(lo, cfg.MinDuty, cfg.MaxDuty);
+                            hi = Clamp(hi, cfg.MinDuty, cfg.MaxDuty);
+
+                            if (cfg.DitherEnabled && hi > lo)
+                            {
+                                // Engage dither instead of parking: alternate the two duties so
+                                // the averaged speed lands between whole-percent steps. Each leg
+                                // still gets the full settle wait - this changes WHERE the loop
+                                // settles, not HOW FAST it converges.
+                                dithering = true;
+                                ditherLo = lo;
+                                ditherHi = hi;
+                                everStable = true;
+                                SetStatus(FanHoldStatus.Stable);
+                                AppLog.Info("HOLD dither engaged between " + lo + "% and " + hi + "%");
+                                Emit(FanHoldStatus.Stable, raw, filtered, target, duty,
+                                     "target between " + lo + "% and " + hi + "% - dithering for sub-1% average");
+                                if (!await Delay(cfg.SettleDelayMs, ct)) break;
+                                continue;
+                            }
+
+                            // Dither disabled or degenerate bracket: the original park behaviour.
+                            if (duty != bestDuty) { ApplyDuty(bestDuty); duty = bestDuty; }
                             everStable = true;
                             SetStatus(FanHoldStatus.Stable);
                             Emit(FanHoldStatus.Stable, raw, filtered, target, duty,
@@ -361,8 +488,12 @@ namespace pCUE
                         break;
                     }
 
+                    if (fineRegion && step <= 1) prevFineStepDuty = duty;
+
+                    //Local state follows a SUCCESSFUL write (ApplyDuty throws on rejection), so
+                    //a mid-step fault snapshot reports the duty the fan is actually still at.
+                    ApplyDuty(newDuty);
                     duty = newDuty;
-                    ApplyDuty(duty);
                     if (!await Delay(cfg.SettleDelayMs, ct)) break;
 
                     //Throw away everything measured before/at the change. Without this the moving
@@ -391,11 +522,15 @@ namespace pCUE
             }
         }
 
-        private void ApplyDuty(int duty)
+        private void ApplyDuty(int duty, bool quiet = false)
         {
-            CurrentDuty = duty;
-            AppLog.Info("HOLD duty -> " + duty + "%");
+            //Actuator FIRST: if the device rejects the write (it throws), CurrentDuty, the log and
+            //the local loop state must all keep reporting the duty the hardware actually runs -
+            //a fault snapshot that names a duty that was refused is worse than useless.
             _setDuty(duty);
+            CurrentDuty = duty;
+            if (quiet) AppLog.Debug("HOLD duty -> " + duty + "% (dither leg)");
+            else AppLog.Info("HOLD duty -> " + duty + "%");
         }
 
         /// <summary>Cancellable delay. Returns false when cancelled, so callers can break out.</summary>

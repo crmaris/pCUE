@@ -259,7 +259,8 @@ pCUE CLI - every command
 
     tunables: target tolerance minDuty maxDuty startDuty coarseStep fineStep
               coarseThreshold sampleInterval settleDelay stabilizeTime timeout
-              filterWindow maxInvalid
+              filterWindow maxInvalid dither (0/1 - alternate two adjacent duties
+              for a sub-1% average at the resolution limit; on by default)
 
   Hardware
     open | close               connect / disconnect the Commander PRO

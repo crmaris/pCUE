@@ -105,8 +105,12 @@
                 <TextBlock Style="{StaticResource P}">
                     The status line shows the loop working: <Bold>Ramping</Bold>, then
                     <Bold>Stabilizing</Bold>, then <Bold>Stable</Bold>. Expect it to settle in under a minute.
-                    Fan power moves in whole percent, so the closest reachable speed is usually within
-                    20-25 RPM of the target; pCUE stops at the nearest step instead of hunting forever.
+                    Fan power moves in whole percent, so the closest single step is usually within
+                    20-25 RPM of the target. To do better than any single step can, pCUE alternates
+                    between the two neighbouring percentages - the fan's inertia averages them out,
+                    landing closer to the target than either step alone. A device that refuses a
+                    command (an RPM target on a 3-pin channel, for example) is now reported in the
+                    status line instead of failing silently.
                 </TextBlock>
 
                 <TextBlock Style="{StaticResource H}" Text="Buttons"/>

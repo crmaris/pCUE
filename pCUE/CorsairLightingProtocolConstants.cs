@@ -1,13 +1,9 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Runtime.InteropServices;
 
 namespace pCUE
 {
-     class CorsairLightingProtocolConstants
+    /// <summary>Command bytes of the Corsair Commander PRO USB-HID protocol.</summary>
+    static class CorsairLightingProtocolConstants
     {
         public const int COMMAND_SIZE = 64;
         public const int RESPONSE_SIZE = 16;
@@ -52,20 +48,5 @@ namespace pCUE
         public const int Fan_Auto_Mode = 0;
         public const int Fan_3pin_Mode = 1;
         public const int Fan_4pin_Mode = 2;
-
-        public struct Command
-        {          
-            [StructLayout(LayoutKind.Explicit)]
-            unsafe struct Command_Union
-            {
-                [FieldOffset(0)]
-                public byte command;
-                [FieldOffset(1)]              
-                public fixed byte data[COMMAND_SIZE - 1];     //me to fixed ola ok       
-                [FieldOffset(0)]
-                public fixed byte raw[COMMAND_SIZE];
-            }
-        }
-
     }
 }

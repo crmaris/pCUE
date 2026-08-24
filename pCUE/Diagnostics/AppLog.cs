@@ -28,6 +28,9 @@ namespace pCUE
         private static readonly Queue<string> Lines = new Queue<string>(MaxLines);
         private static string _filePath;
         private static bool _toFile;
+        //Kept open so a chatty Debug level costs one buffered write per line instead of an
+        //open/append/close cycle (the old File.AppendAllText-per-line did real I/O each call).
+        private static StreamWriter _fileWriter;
 
         /// <summary>Messages below this level are dropped. Debug is off by default (it is chatty).</summary>
         public static LogLevel Level { get; set; } = LogLevel.Info;
@@ -49,12 +52,14 @@ namespace pCUE
                     Directory.CreateDirectory(dir);
                     _filePath = Path.Combine(dir,
                         "pcue_" + DateTime.Now.ToString("yyyyMMdd_HHmmss", CultureInfo.InvariantCulture) + ".log");
-                    File.AppendAllText(_filePath, "pCUE log started " + DateTime.Now + Environment.NewLine);
+                    _fileWriter = new StreamWriter(_filePath, append: true, Encoding.UTF8) { AutoFlush = true };
+                    _fileWriter.WriteLine("pCUE log started " + DateTime.Now);
                     _toFile = true;
                 }
                 catch (Exception ex)
                 {
                     _toFile = false;
+                    TryCloseWriterNoLock();
                     System.Diagnostics.Debug.WriteLine("pCUE: could not open log file: " + ex.Message);
                 }
             }
@@ -80,12 +85,24 @@ namespace pCUE
 
                 if (_toFile)
                 {
-                    try { File.AppendAllText(_filePath, line + Environment.NewLine); }
-                    catch { /* never let logging break the app */ }
+                    try { _fileWriter.WriteLine(line); }
+                    catch
+                    {
+                        //A failing file (disk full, share removed, ...) must never break the app;
+                        //drop the mirror and keep the in-memory buffer.
+                        _toFile = false;
+                        TryCloseWriterNoLock();
+                    }
                 }
             }
 
             System.Diagnostics.Debug.WriteLine(line);
+        }
+
+        private static void TryCloseWriterNoLock()
+        {
+            try { _fileWriter?.Dispose(); } catch { }
+            _fileWriter = null;
         }
 
         /// <summary>Most recent lines, oldest first. Used by the remote API's /log endpoint.</summary>

@@ -11,7 +11,13 @@ Temp/MHz/Load; lets the user set fan mode (Auto / 3-pin / 4-pin / Disconnect), f
 `requireAdministrator`) so LibreHardwareMonitor can load its kernel driver.
 
 ## Key files (all under `pCUE/`)
-- `MainWindow.xaml` / `MainWindow.xaml.cs` — the whole UI + all device logic.
+- `MainWindow.xaml` / `MainWindow.xaml.cs` — the UI, polling, stats rendering, remote-target impl.
+  (The HID protocol no longer lives here — see below. Stats are computed where values are
+  produced via `RunStatSet`, NOT parsed back out of TextBoxes; control arrays are built explicitly
+  from named fields in the ctor, so XAML reorder cannot scramble Current/Min/Max.)
+- `CommanderProDevice.cs` — the whole Commander PRO HID session: connect (with distinct
+  wrong-device / not-found outcomes), serialized reads/writes, status-byte checking, per-channel
+  `_lastCommandedDuty` tracking (only updated on ACCEPTED writes).
 - `CorsairLightingProtocolConstants.cs` — Commander PRO HID command bytes.
 - `Tachometer/HidTachometer.cs` — external bench tachometer driver (see session log).
 - `Properties/AssemblyInfo.cs` — versions.
@@ -38,8 +44,9 @@ protocol.
   fan's start-up speed leaves it stationary.
 - Packet layouts were verified against the reverse-engineered protocol and are correct:
   `0x28` = `[0x02, fan, mode]`, `0x23` = `[fan, duty]`, `0x24` = `[fan, rpm_hi, rpm_lo]`.
-- Known gap: pCUE **never checks the device's response status byte** (`0x00` OK / `0x01` error) on
-  any write, so a rejected command fails silently. Worth adding.
+- **Every write is status-checked (2026-08-25).** `CommanderProDevice.WriteFan*` returns false when
+  the device's reply carries `0x01`; the UI shows "Rejected by device" and the remote API returns
+  the error to its caller. A rejected command no longer looks like success anywhere.
 
 ## Closed-loop RPM hold (`pCUE/Control/FanRpmHoldController.cs`)
 Because the Commander will not regulate by RPM on a DC channel, pCUE closes that loop in software:
@@ -56,13 +63,17 @@ rather than running blind.
 **One deliberate difference from the original:** its actuator was a PSU voltage with millivolt
 resolution; ours is whole-percent duty, so the finest move is 1% (~20–50 RPM on a real fan). A
 tolerance tighter than one duty step is unreachable and a naive loop would oscillate forever, so
-`ResolutionLimitReversals` detects the bracketing, parks on the closer duty and reports
-"at 1% duty resolution limit". If finer is ever needed, the next step is **duty dithering**
-(alternate 43/44% so inertia averages to ~43.5%) — not yet implemented.
+`ResolutionLimitReversals` detects the bracketing. **Since 2026-08-25 the default response is
+duty dithering** (`DitherEnabled`, remote key `dither`): alternate the two adjacent duties, each
+for the full `SettleDelayMs`, so inertia averages an effective sub-1% duty; the error sign picks
+the leg each window and the loop exits dithering if the error exceeds `RpmTolerance*3`. With
+dither disabled it parks on the closer duty as before and reports "at 1% duty resolution limit".
+Dither changes WHERE the loop settles, not how fast it converges — no settle times were touched.
 
 Stops on: user Stop, lost feedback (8 consecutive bad samples — **fan is left at its current duty**,
 still cooling), saturation at 0/100% while off target, timeout to first stable, manual **Set Speed**
-(the user taking over), Commander disconnect, and app close.
+(the user taking over), a device-rejected duty write (the actuator lambda throws; the loop faults
+out instead of steering blind), Commander disconnect, and app close.
 
 ## Hard constraints — do not break
 - **LibreHardwareMonitorLib pinned at 0.9.4.** Do not upgrade (0.9.5+ force HidSharp 2.6.4, which
@@ -152,9 +163,17 @@ The rest of the app logs through `Debug.WriteLine`, which is `[Conditional("DEBU
 made a remote hardware fault undebuggable. **Use `AppLog` for anything that must survive Release.**
 It keeps a 4000-line ring buffer (served by `GET /log`) plus an optional file.
 
-Every Commander PRO write is now traced with its command bytes **and the device's reply**, including
-the status byte (`0x00` OK / `0x01` error) that pCUE previously discarded — a rejected command used
-to look identical to a successful one.
+Every Commander PRO write is traced with its command bytes **and the device's reply**, including
+the status byte (`0x00` OK / `0x01` error) — and since 2026-08-25 the status byte is also
+**enforced**: writes return false on rejection, the UI reports it, and a rejected duty write
+during a hold faults the loop. The file mirror keeps a `StreamWriter` open (AutoFlush) instead of
+reopening per line.
+
+### `/status` honesty (2026-08-25)
+`hold.duty` is `null` unless this session actually set one: `"loop"` (live controller value) while
+a hold runs, `"tracked"` (last accepted commanded duty) otherwise, and `dutySource` names which.
+The old always-int behaviour once showed 32% while the fan really ran at ~50% — do not go back to
+reporting stale controller values after the loop stops.
 
 ## In-app updater  (`pCUE/Updates/AppUpdateService.cs`)
 Mirrors the Powenetics V2/V3 component updater. Reads the shared **public** manifest
@@ -232,6 +251,74 @@ expected and harmless, but it is the exact shape that made 1.4.1 declare a false
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-08-25 (later) — Codex cross-review, six fixes, repack as 1.5.3
+A read-only `codex exec` review (`gpt-5.6-sol`, xhigh) over the uncommitted diff + new
+`CommanderProDevice.cs` found no CRITICALs and 2 MAJOR / 2 MINOR / 2 NIT — all verified against
+source and all real; every one fixed:
+
+- **MAJOR dither never alternated properly**: the dither leg wrote the hardware via `ApplyDuty(leg)`
+  but left the loop-local `duty` stale, so when the error sign flipped back to a leg that "matched"
+  the stale value, the required write was SKIPPED while the fan sat on the other leg. Local state
+  now moves together with the hardware.
+- **MAJOR retarget trapped in an obsolete bracket**: dither only exited at >tolerance*3, so a live
+  retarget (or drift) landing ~1-3x tolerance away kept reporting Stable around the OLD duties
+  forever. Fixed two ways: any target change drops the bracket immediately (loop detects
+  `GetTarget()` change), and sustained off-band windows (>=4 consecutive outside tolerance) also
+  exit to normal stepping. Instant exit at >3x tolerance remains.
+- **MINOR honest fault snapshots**: duty is now applied FIRST (`_setDuty` throws on device
+  rejection); `CurrentDuty`, the local `duty` and the "duty left at N%" fault log/snapshot are
+  updated only after a SUCCESSFUL write. Same ordering fix in the stall back-off path.
+- **MINOR not-connected mislabelled as rejected**: Set Speed pre-checks
+  `Corsair_Commander_Connected`; the wrappers' `false` now unambiguously means "device refused".
+- **NIT**: stale Solution Items block removed from pCUE.sln (GpuzShMem.dll,
+  OpenHardwareMonitorLib.dll); trailing whitespace cleaned (`git diff --check` clean).
+
+Codex confirmed clean: 0%-duty-is-a-real-write, control-array mappings, positive-sample stats,
+accepted-write-only duty tracking, distinct connect outcomes, `_ioLock` serialization, pins,
+constant-time token compare. Full CI re-run green; **repacked as 1.5.3** (superseded 1.5.2
+artifacts deleted — they existed for minutes and were never published). The bench checklist below
+now ALSO includes: descending convergence AND live retargeting with dither ON.
+
+### 2026-08-25 — Device-class extraction, status-byte enforcement, sub-1% dithering, stats model, hygiene
+Four tiers of work from a full-codebase review; **no new bench validation yet** (see the re-check
+list at the end).
+
+- **`CommanderProDevice` extracted** out of `MainWindow.xaml.cs` (protocol + `hidLock` equivalent +
+  buffers + firmware read). Behavior preserved, including the two distinct Open-button outcomes
+  ("Wrong device" vs "Device not found") via `CommanderProOpenException.DeviceFound`.
+- **Status byte enforced.** All `WriteFan*` calls return false on `0x01`. Set Speed reports
+  "Rejected by device: fan N" in the status line; `/fan/rpm`, `/fan/duty`, `/fan/mode` return the
+  error to the remote caller; a rejected duty write during a hold faults the loop instead of
+  steering blind. This kills the classic trap: an RPM target on a 3-pin channel used to look like
+  success. `_lastCommandedDuty` is now only updated on ACCEPTED writes.
+- **Sub-1% duty dithering** (`FanHoldConfig.DitherEnabled`, default ON; remote key `dither`,
+  e.g. `pcue config dither 0`). At the resolution limit the loop alternates the bracket duties,
+  each for the full settle wait; exits to normal stepping if |err| > tolerance*3. Dither legs log
+  at Debug (`ApplyDuty(quiet:)`) so the Info ring is not flooded forever.
+- **`hold.duty` honesty** in `/status`: null/`dutySource` when nothing commanded this session;
+  "tracked" uses the device class's accepted-write record.
+- **Suspicious 0% read-back retried once** at hold start (fan turning + no tracked duty + 0%
+  reported) with a Warn line both ways, before degrading to the 40% kick.
+- **Stats model**: `RunStatSet` computes Min/Max/Avg where values are produced (poll loop / CPU
+  timer); the old per-500 ms TextBox re-parse (`Set_min_max`, ~200 lines, culture-sensitive) and
+  the order-dependent `FindLogicalChildren` collection are gone. Control arrays are built
+  explicitly from named fields; semantics preserved (>0 samples only, Min never regresses, shared
+  ~27.8 h rollover, CPU AVG-in-Min-column under the checkbox).
+- **Hygiene**: deleted dead `HardwareInfo.cs` / `MessageBoxEx.cs` / `ScreenCapture.cs`, unused
+  members (`PerformClick`, `BaseDir`, `cultureUS`, GPU-Z sensor indices, `IsProcessOpen`,
+  `Kill_Function`/`ForceKill`, unsafe `Command` struct → `AllowUnsafeBlocks` removed), legacy
+  payloads in the project folder (`Core Temp.exe/.ini`, old `OpenHardwareMonitorLib.dll`, Core
+  Temp's Changes/License/Tips txt), `pCUE_TemporaryKey.pfx`, and the stale `ModernUI.WPF` /
+  `System.Management` package entries (+ the framework System.Management reference).
+- **Hardening**: `AppLog` keeps its file writer open (AutoFlush, self-disables on I/O failure);
+  token compare in `RemoteControlServer` is constant-time (`FixedTimeEquals`; net48 has no
+  `CryptographicOperations`).
+- Debug build clean (only the known HidDeviceLoader CS0612 baseline) and `Test-UiLayout` passes.
+- **Bench re-checks owed before trusting the new paths:** (1) RPM target on a 3-pin channel must
+  now show "Rejected by device"; (2) descending-target case with dithering ON (the reversal area
+  was rewritten — CLAUDE.md's standing warning applies); (3) one hold across an app restart to
+  see the retry path log; (4) `/status` `duty`/`dutySource` after Stop.
+
 ### 2026-08-21 — Full CLI (no app change, no release)
 `tools/pcue-cli.ps1` rewritten to cover **every** endpoint. It previously reached about two thirds
 and never exposed `/hold/config` at all — the 13 tunables of the hold loop — nor `/log/clear`,
@@ -445,9 +532,9 @@ All three shipped and **verified on the bench on 1.4.6**.
   now white for normal state, yellow for attention (`UpdateInfoBrush`/`UpdateAlertBrush`).
   `Status_Label` (Commander) still uses the old lime/orange palette — it sits higher up on a darker
   background and was not reported as a problem.
-- **Known, not yet actioned:** `Extended.Wpf.Toolkit` is referenced but **completely unused**
-  (0 `xctk:` in XAML, 0 in code) and accounts for ~2 MB of the 2.9 MB staged build. Removing it
-  would cut the installer to roughly 1 MB. Owner decision pending.
+- **Extended.Wpf.Toolkit — resolved.** It was referenced but completely unused (~2 MB of the
+  staged build); it has since been removed from the csproj and packages.config (and the 2026-08-25
+  sweep also dropped the never-referenced ModernUI.WPF package entry).
 
 ### 2026-08-08 — External bench tachometer support
 - Added `pCUE/Tachometer/HidTachometer.cs`: USB-HID bench tachometer driver (**VID 0x1A86 /
