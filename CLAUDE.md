@@ -268,7 +268,8 @@ six codex-review fixes) was committed as one change (`b043192`, +918/−2628), m
   immediately before). Installer remains UNSIGNED.
 - **Bench checklist unchanged and still owed**: descending convergence AND live retarget with
   dither ON; RPM target on a 3-pin channel must show rejection; hold across an app restart (retry
-  Warn line); `/status` after Stop shows `duty: null`.
+  Warn line); `/status` after Stop reports the last ACCEPTED duty with `dutySource: "tracked"`
+  (it is only `null`/`unknown` before this session has commanded any duty on the hold channel).
 
 ### 2026-08-25 (later) — Codex cross-review, six fixes, repack as 1.5.3
 A read-only `codex exec` review (`gpt-5.6-sol`, xhigh) over the uncommitted diff + new
