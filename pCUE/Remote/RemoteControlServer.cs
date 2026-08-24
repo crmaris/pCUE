@@ -435,6 +435,8 @@ namespace pCUE
         /// <summary>
         /// Loopback is always allowed. Anything else requires a matching token - so simply widening
         /// the prefix cannot accidentally expose unauthenticated fan control on the network.
+        /// The token comparison is constant-time: this server spins real fans, and a timing side
+        /// channel has no business existing even on a bench LAN.
         /// </summary>
         private bool IsAuthorized(HttpListenerRequest request)
         {
@@ -443,8 +445,26 @@ namespace pCUE
 
             string header = request.Headers["X-pCUE-Token"] ?? "";
             string query = request.QueryString["token"] ?? "";
-            return string.Equals(header, _token, StringComparison.Ordinal)
-                || string.Equals(query, _token, StringComparison.Ordinal);
+            return FixedTimeEquals(header, _token) || FixedTimeEquals(query, _token);
+        }
+
+        /// <summary>Constant-time string equality (byte-wise, length-safe).</summary>
+        private static bool FixedTimeEquals(string a, string b)
+        {
+            // CryptographicOperations.FixedTimeEquals does not exist on .NET Framework; this is
+            // the same idea - the loop always runs over the LONGER input, so neither the content
+            // nor the length of the expected token leaks through timing.
+            if (a == null) a = "";
+            if (b == null) b = "";
+            uint diff = (uint)a.Length ^ (uint)b.Length;
+            int n = Math.Max(a.Length, b.Length);
+            for (int i = 0; i < n; i++)
+            {
+                char ca = i < a.Length ? a[i] : '\0';
+                char cb = i < b.Length ? b[i] : '\0';
+                diff |= (uint)(ca ^ cb);
+            }
+            return diff == 0;
         }
 
         // ------------------------------------------------------------------ parameter helpers

@@ -9,14 +9,6 @@ using Microsoft.Win32;
 using System.Threading;
 using System.Threading.Tasks;
 
-//struct ResultsStruct
-//{
-//    public double Min;
-//    public double Max;
-//    public double Average;
-//    public double Sum;
-//};
-
 public enum FanMask : byte
 {
     /** No fan connected */
@@ -39,18 +31,6 @@ public enum FanDetectionType : byte
     Disconnected = 0x03
 }
 
-//gia na ekteleite i PerformClick kanonika
-namespace System.Windows.Controls
-{
-    public static class MyExt
-    {
-        public static void PerformClick(this Button btn)
-        {
-            btn.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        }
-    }
-}
-
 namespace pCUE
 {
     /// <summary>
@@ -58,42 +38,17 @@ namespace pCUE
     /// </summary>
     public partial class MainWindow : Window, IRemoteControlTarget
     {
-        //App directory
-        public static string BaseDir = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-
-        //gia to app autostart
-        bool isinstartup = false;
-        
-        //gia to Corsair Commander Pro
-        HidSharp.HidDeviceLoader Commander_Loader = new HidSharp.HidDeviceLoader();
-        HidSharp.HidStream stream;
-        HidSharp.HidDevice device;
-        byte[] outbuf = new byte[64];
-        byte[] inbuf = new byte[16];
+        //The Commander PRO HID session. All protocol knowledge lives in the device class; this
+        //window only orchestrates UI, polling and the hold loop on top of it.
+        readonly CommanderProDevice commander = new CommanderProDevice();
         bool Corsair_Commander_Connected = false;
 
-        //Serializes every HID stream transaction so the background poll loop and the
-        //UI-thread commands (set speed, set mode, connect) can never overlap on the device.
-        readonly object hidLock = new object();
         //Background fan-RPM polling (replaces the old UI-thread WinForms timer).
         CancellationTokenSource fanPollCts;
         Task fanPollTask;
         volatile bool fanPollErrorLogged = false;
         //Auto-disconnect once this many poll passes fail back-to-back (a few seconds of dead I/O).
         const int MaxConsecutivePollFailures = 3;
-        
-        //gia na exo tin teleia os decimal separator panta
-        System.IFormatProvider cultureUS = new System.Globalization.CultureInfo("en-US");      
-
-        //gia toys sensors toy GPU-Z (Nvidia defaults)
-        int fan_speed = 4;
-        int gpu_temperature = 2;
-        int gpu_load = 6;
-        int gpu_Watts = 10;
-        int core_clock = 0;
-        int memory_clock = 1;
-        int vddc = 13;
-        int cpu_temperature = 14;
 
         //fan constants
         public const int FAN_FORCE_THREE_PIN_MODE_ON = 0x01;
@@ -106,55 +61,29 @@ namespace pCUE
         Computer thisComputer;
         readonly UpdateVisitor lhmUpdateVisitor = new UpdateVisitor();
 
-
         //Timer for CPU Data
         static System.Windows.Forms.Timer CpuDataTimer = new System.Windows.Forms.Timer();
 
-        //Timer for min-max-avg values
+        //Periodic UI refresh: keeps the tachometer panel honest about stale/lost signal. The
+        //Min/Max/Avg statistics no longer need a timer - they are computed where each value is
+        //produced (the poll loop and the CPU timer) instead of being parsed back out of TextBoxes.
         static System.Windows.Forms.Timer Set_Min_Max_AVG_timer = new System.Windows.Forms.Timer();
 
+        //Min/Max/Avg statistics, computed from real values rather than read back out of the UI.
+        //9 series: CPU temp/clock/load + six fan channels.
+        readonly RunStatSet stats = new RunStatSet(9);
+        //Series indices inside the stats bank.
+        const int StatCpuTemp = 0, StatCpuClock = 1, StatCpuLoad = 2;
+        const int StatFanBase = 3;   // fans 0..5 -> StatFanBase+0..+5
 
-        //for min-max-avg
-        int counter_min_max_avg = 0;
-        int CPU_temp_counter_min_max_avg = 0;
-        int CPU_MHz_counter_min_max_avg = 0;
-        int CPU_Load_counter_min_max_avg = 0;
-        int avg_fan1_counter_min_max_avg = 0;
-        int avg_fan2_counter_min_max_avg = 0;
-        int avg_fan3_counter_min_max_avg = 0;
-        int avg_fan4_counter_min_max_avg = 0;
-        int avg_fan5_counter_min_max_avg = 0;
-        int avg_fan6_counter_min_max_avg = 0;
-
-        double overal_CPU_temp = 0.0;
-        double overal_CPU_MHz = 0.0;
-        double overal_CPU_Load = 0.0;
-        double overal_fan1_speed = 0.0;
-        double overal_fan2_speed = 0.0;
-        double overal_fan3_speed = 0.0;
-        double overal_fan4_speed = 0.0;
-        double overal_fan5_speed = 0.0;
-        double overal_fan6_speed = 0.0;
-
-        double avg_CPU_temp = 0.0;
-        double avg_CPU_MHz = 0.0;
-        double avg_CPU_Load = 0.0;
-        double avg_fan1_speed = 0.0;
-        double avg_fan2_speed = 0.0;
-        double avg_fan3_speed = 0.0;
-        double avg_fan4_speed = 0.0;
-        double avg_fan5_speed = 0.0;
-        double avg_fan6_speed = 0.0;       
-
-        //Control Arrays       
-        List<TextBox> CPU_array = new List<TextBox>();
-        List<TextBox> Fan_array = new List<TextBox>();
-        List<NumericUpDownLib.UIntegerUpDown> Fan_Numeric_Boxes = new List<NumericUpDownLib.UIntegerUpDown>();
-        List<Slider> Fan_Slider = new List<Slider>();
-        List<ComboBox> Fan_Mode_Controls = new List<ComboBox>();
-
-        //Give time to form to load properly timer
-        System.Windows.Threading.DispatcherTimer oneShot = new System.Windows.Threading.DispatcherTimer();
+        //Control arrays. Built explicitly from the named fields in the constructor - the old
+        //FindLogicalChildren walk depended on XAML declaration order, so reordering the XAML
+        //silently scrambled which box was Current and which was Min.
+        TextBox[] CPU_array;
+        TextBox[] Fan_array;
+        NumericUpDownLib.UIntegerUpDown[] Fan_Numeric_Boxes;
+        Slider[] Fan_Slider;
+        ComboBox[] Fan_Mode_Controls;
 
         //External bench tachometer (USB-HID, VID 0x1A86 / PID 0xE008). Connected on demand from the
         //Tachometer panel. When assigned to a fan channel it overrides that fan's displayed RPM with
@@ -181,14 +110,6 @@ namespace pCUE
         FanRpmHoldController rpmHold;
         volatile int holdChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
 
-        //Duty pCUE last commanded per channel, -1 if none this session. The RPM hold starts from
-        //this rather than a fixed percentage, so a small target change stays a small move.
-        //It is the preferred source because every duty in this app goes through
-        //Commander_Pro_Set_Fan_Power; READ_FAN_POWER (0x22) is the fallback that covers the gap
-        //this cannot - the first hold after an app restart, when the fan is running at a duty the
-        //device remembers and pCUE does not.
-        readonly int[] lastCommandedDuty = new int[6] { -1, -1, -1, -1, -1, -1 };
-
         //What to open at when the fan is stopped: there is nothing to measure, and nothing to
         //step away from, until it breaks away.
         const int HoldKickStartDuty = 40;
@@ -210,21 +131,29 @@ namespace pCUE
         {
             InitializeComponent();
 
+            //Control arrays, explicitly ordered. Index maps (see the XAML):
+            //  CPU_array  ed1..ed9   - rows Temp/MHz/Load, columns Current/Min/Max -> [0],[3],[6] are Current
+            //  Fan_array  ed10..ed27 - six fan rows x Current/Min/Max             -> [ch*3] is Current
+            CPU_array = new[] { ed1, ed2, ed3, ed4, ed5, ed6, ed7, ed8, ed9 };
+            Fan_array = new[]
+            {
+                ed10, ed11, ed12, ed13, ed14, ed15,
+                ed16, ed17, ed18, ed19, ed20, ed21,
+                ed22, ed23, ed24, ed25, ed26, ed27,
+            };
+            Fan_Numeric_Boxes = new[] { Fan1_Numeric, Fan2_Numeric, Fan3_Numeric, Fan4_Numeric, Fan5_Numeric, Fan6_Numeric };
+            Fan_Slider = new[] { Fan1_Slider, Fan2_Slider, Fan3_Slider, Fan4_Slider, Fan5_Slider, Fan6_Slider };
+            Fan_Mode_Controls = new[] { Combo1, Combo2, Combo3, Combo4, Combo5, Combo6 };
+
             //Read CPU Data
             CpuDataTimer.Tick += new EventHandler(CpuDataTimer_Tick);
             CpuDataTimer.Interval = 500; // specify interval time
 
-            //Fan RPMs are now polled on a background task (StartFanPolling), not a UI timer.
-
-            //Give time to form to load properly timer
-            oneShot.Interval = new TimeSpan(0, 0, 0, 1, 0);
-            oneShot.Tick += new EventHandler(OneShot_Tick);    
-
-            //timer for min-max-avg-values
+            //Periodic tachometer-panel refresh
             Set_Min_Max_AVG_timer.Tick += new EventHandler(Set_Min_Max_AVG_timer_Tick);
-            Set_Min_Max_AVG_timer.Interval = 500; // specify interval time as you want  
+            Set_Min_Max_AVG_timer.Interval = 500; // specify interval time as you want
             Set_Min_Max_AVG_timer.Start();
- 
+
             // CPU sensors via LibreHardwareMonitor (CPU only - that is all pCUE displays).
             // Requires admin rights, which the app manifest already requests.
             thisComputer = new Computer() { IsCpuEnabled = true };
@@ -253,9 +182,6 @@ namespace pCUE
                 this.Title = "pCUE - Cybenetics LTD - v." + fileVersion;
             }
             catch (Exception ex) { Debug.WriteLine("pCUE: could not read file version: " + ex.Message); }
-
-            //Fills the Control Lists
-            oneShot.Start();
 
             if (Properties.Settings.Default.AutoStart1)
             { autostartCheckBox.IsChecked = true; }
@@ -309,7 +235,7 @@ namespace pCUE
             //stop background fan polling and release the HID stream
             Corsair_Commander_Connected = false;
             StopFanPolling();
-            CloseHidStream();
+            commander.Disconnect();
 
             //release the LibreHardwareMonitor session (unloads its kernel driver)
             try { thisComputer?.Close(); }
@@ -351,99 +277,29 @@ namespace pCUE
         }
         #endregion
 
-        //finds all controls
-        public static IEnumerable<T> FindLogicalChildren<T>(DependencyObject depObj) where T : DependencyObject
-        {
-            if (depObj != null)
-            {
-                foreach (object rawChild in LogicalTreeHelper.GetChildren(depObj))
-                {
-                    if (rawChild is DependencyObject)
-                    {
-                        DependencyObject child = (DependencyObject)rawChild;
-                        if (child is T)
-                        {
-                            yield return (T)child;
-                        }
-
-                        foreach (T childOfChild in FindLogicalChildren<T>(child))
-                        {
-                            yield return childOfChild;
-                        }
-                    }
-                }
-            }
-        }
-
         private void Set_Min_Max_AVG_timer_Tick(object sender, EventArgs e)
         {
-            Set_min_max(0, 1, 2, 1);
-            Set_min_max(3, 4, 5, 1);
-            Set_min_max(6, 7, 8, 1);
-            Set_min_max(0, 1, 2, 2);
-            Set_min_max(3, 4, 5, 2);
-            Set_min_max(6, 7, 8, 2);
-            Set_min_max(9, 10, 11, 2);
-            Set_min_max(12, 13, 14, 2);
-            Set_min_max(15, 16, 17, 2);
-
-            //feed the dedicated fan Average column (always live, independent of the AVG checkbox)
-            Set_Fan_Average_Column();
-
-            //keep the bench-tachometer readout honest about stale/lost signal
+            //The Min/Max/Avg figures are now maintained where each value is produced; this timer
+            //only keeps the bench-tachometer readout honest about stale/lost signal.
             Update_Tach_Panel();
         }
 
         //Shows the running average of each fan in its own column (ed28..ed33)
         private void Set_Fan_Average_Column()
         {
-            ed28.Text = Math.Round(avg_fan1_speed).ToString();
-            ed29.Text = Math.Round(avg_fan2_speed).ToString();
-            ed30.Text = Math.Round(avg_fan3_speed).ToString();
-            ed31.Text = Math.Round(avg_fan4_speed).ToString();
-            ed32.Text = Math.Round(avg_fan5_speed).ToString();
-            ed33.Text = Math.Round(avg_fan6_speed).ToString();
+            TextBox[] avg = { ed28, ed29, ed30, ed31, ed32, ed33 };
+            for (int ch = 0; ch < 6; ch++)
+                avg[ch].Text = Math.Round(stats.Average(StatFanBase + ch)).ToString();
         }
 
-        //Give time to form to properly load timer
-        void OneShot_Tick(object sender, EventArgs e)
-        {
-            oneShot.Stop();
-
-            foreach (TextBox tb in FindLogicalChildren<TextBox>(CPU_Grid))
-            {
-                CPU_array.Add(tb);
-            }
-
-            foreach (TextBox tb in FindLogicalChildren<TextBox>(Fan_Grid))
-            {
-                Fan_array.Add(tb);
-            }
-
-            foreach (NumericUpDownLib.UIntegerUpDown tb in FindLogicalChildren<NumericUpDownLib.UIntegerUpDown>(Fans_Grid))
-            {
-                Fan_Numeric_Boxes.Add(tb);
-            }
-
-            foreach (Slider tb in FindLogicalChildren<Slider>(Fans_Grid))
-            {
-                Fan_Slider.Add(tb);
-            }
-
-            foreach (ComboBox tb in FindLogicalChildren<ComboBox>(Fans_Grid))
-            {
-                Fan_Mode_Controls.Add(tb);
-            }
-                          
-        }
-
-        //Generic Functions      
+        //Generic Functions
 
         #region Commander Pro Functions
         // ---- Background fan-RPM polling --------------------------------------------------
         // Fan speeds used to be read on a WinForms (UI-thread) timer, so a slow or stalled HID
-        // transfer froze the whole window. We now poll on a background task, serialize every
-        // HID access through hidLock, and marshal only the final RPM values onto the UI thread.
+        // transfer froze the whole window. We now poll on a background task; every HID access is
+        // serialized inside CommanderProDevice, and only the final RPM values are marshalled
+        // onto the UI thread.
 
         //Start the background poll loop. Safe to call repeatedly (it stops any previous loop).
         private void StartFanPolling()
@@ -487,7 +343,7 @@ namespace pCUE
 
                         try
                         {
-                            string fan_mask = ReadFanMaskLocked();   //e.g. "011000"
+                            string fan_mask = commander.ReadFanMask();   //e.g. "011000"
 
                             for (int ch = 0; (ch < 6) && (ch < fan_mask.Length); ch++)
                             {
@@ -495,7 +351,7 @@ namespace pCUE
 
                                 char y = fan_mask[ch];
                                 //'1' = 3-pin, '2' = 4-pin => active; anything else => inactive
-                                rpms[ch] = ((y == '1') || (y == '2')) ? ReadFanRpmLocked(ch) : 0;
+                                rpms[ch] = ((y == '1') || (y == '2')) ? commander.ReadFanRpm(ch) : 0;
                             }
 
                             fanPollErrorLogged = false;
@@ -567,7 +423,8 @@ namespace pCUE
         }
 
         //Push the freshly polled RPMs onto the read-out text boxes. Runs on the UI thread.
-        //Inactive/disconnected channels are cleared to "0" so stale RPMs never linger.
+        //Inactive/disconnected channels are cleared to "0" so stale RPMs never linger, and each
+        //non-zero reading feeds that fan's Min/Max/Avg statistics at the moment it is produced.
         private void UpdateFanRpmUi(int[] rpms)
         {
             if (rpms == null) return;
@@ -575,60 +432,13 @@ namespace pCUE
             for (int ch = 0; ch < 6; ch++)
             {
                 int idx = ch * 3;                     // channel -> "Current" index in Fan_array (0,3,6,9,12,15)
-                if (idx >= Fan_array.Count) return;   // controls not collected yet
+                if (idx >= Fan_array.Length) return;
                 Fan_array[idx].Text = rpms[ch].ToString();
+                stats.Add(StatFanBase + ch, rpms[ch]);
             }
-        }
 
-        //Locked HID read of the fan mask (which channels are populated). Background-thread safe.
-        private string ReadFanMaskLocked()
-        {
-            string fan_mask = "";
-            lock (hidLock)
-            {
-                HidSharp.HidStream s = stream;
-                if (s == null) return "000000";
-
-                byte[] o = new byte[64];
-                byte[] i = new byte[16];
-                o[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_MASK;
-                s.Write(o);
-                s.Read(i);
-
-                for (int k = 2; k < 8; k++) { fan_mask = fan_mask + i[k].ToString(); }
-            }
-            return (fan_mask.Length == 6) ? fan_mask : "000000";
-        }
-
-        //Locked HID read of a single fan's RPM. Background-thread safe.
-        private int ReadFanRpmLocked(int channel)
-        {
-            lock (hidLock)
-            {
-                HidSharp.HidStream s = stream;
-                if (s == null) return 0;
-
-                byte[] o = new byte[64];
-                byte[] i = new byte[16];
-                o[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_SPEED;
-                o[2] = (byte)channel;
-                s.Write(o);
-                s.Read(i);
-
-                return (i[2] << 8) + i[3];
-            }
-        }
-
-        //Close/dispose the HID stream. Nulling the field first makes any in-flight locked read
-        //bail out; closing the captured stream interrupts a read that is currently blocking.
-        private void CloseHidStream()
-        {
-            HidSharp.HidStream local = stream;
-            stream = null;
-            if (local == null) return;
-            try { local.Close(); }
-            catch (Exception ex) { Debug.WriteLine("pCUE: HID stream close failed: " + ex.Message); }
-            try { local.Dispose(); } catch { }
+            Set_Fan_Average_Column();
+            RenderFanMinMaxColumns();
         }
 
         //Single safe teardown for the Commander Pro connection + UI reset. MUST run on the UI
@@ -639,7 +449,7 @@ namespace pCUE
             StopRpmHold("Commander disconnected");   //the loop has no actuator without the device
             Corsair_Commander_Connected = false;
             StopFanPolling();   //cancellation only - never waits on the poll task
-            CloseHidStream();   //nulls + closes the stream, interrupting any blocked read
+            commander.Disconnect();   //nulls + closes the stream, interrupting any blocked read
 
             //reset the UI to the disconnected state
             Open_Corsair_Commander.Content = "Open";
@@ -654,43 +464,14 @@ namespace pCUE
             Status_Label.Foreground = brush;
         }
 
-        private string Commander_Pro_READ_FAN_MASK()
-        {
-            string fan_mask = "";
-
-            if (Corsair_Commander_Connected == true)
-            {
-                lock (hidLock)
-                {
-                    if (stream == null) return "000000";
-
-                    //clear the output buffer
-                    for (int i = 0; i < 63; ++i)
-                    {
-                        outbuf[i] = 0x00;
-                    }
-
-                    // Read Fan Mode
-                    outbuf[1] = CorsairLightingProtocolConstants.READ_FAN_MASK;
-
-                    // Send the command
-                    stream.Write(outbuf);
-
-                    stream.Read(inbuf);
-
-                    for (int i = 2; i < 8; ++i)
-                    {
-                        fan_mask = fan_mask + inbuf[i].ToString();
-                    }
-                }
-            }
-            if (fan_mask.Length == 6) return fan_mask;
-            else return "000000";
-        }
+        // ---- Commander PRO wrappers -------------------------------------------------------
+        // The protocol itself lives in CommanderProDevice. What remains here is orchestration:
+        // keeping the UI in step and surfacing what the device says - including a REJECTION,
+        // which the status byte reports and which used to be silently dropped.
 
         private void Commander_Pro_READ_FAN_MODEs()
         {
-            string fan_mask = Commander_Pro_READ_FAN_MASK(); //px. 011000
+            string fan_mask = commander.ReadFanMask(); //px. 011000
 
             for (int j = 0; j < fan_mask.Length; j++)
             {
@@ -712,206 +493,61 @@ namespace pCUE
             }
         }
 
-        private int Commander_Pro_READ_FAN_Power(byte fan_number)
-        {
-            int fan_power = 0;
+        //Set the fan mode (the drop-down's SelectionChanged handler).
+        //Records each channel's last mode-write outcome so the remote API can report a rejection
+        //to ITS caller too (the write itself happens inside the SelectionChanged event).
+        readonly bool[] fanModeWriteOk = new bool[6];
 
-            if (Corsair_Commander_Connected == true)
-            {
-                lock (hidLock)
-                {
-                    if (stream == null) return 0;
-
-                    //clear the output buffer
-                    for (int i = 0; i < 64; ++i)
-                    {
-                        outbuf[i] = 0x00;
-                    }
-
-                    // Read Fan Mode
-                    outbuf[1] = CorsairLightingProtocolConstants.READ_FAN_POWER;
-                    outbuf[2] = fan_number;
-
-                    // Send the command
-                    stream.Write(outbuf);
-
-                    stream.Read(inbuf);
-
-                    if (inbuf[2] <= 100)
-                    {
-                        fan_power = inbuf[2];
-                    }
-                }
-            }
-
-            return fan_power;
-        }
-
-        private int Commander_Pro_READ_FAN_Speed(byte fan_number)
-        {
-            int fan_speed = 0;
-
-            if (Corsair_Commander_Connected == true)
-            {
-                lock (hidLock)
-                {
-                    if (stream == null) return 0;
-
-                    //clear the output buffer
-                    for (int i = 0; i < 64; ++i)
-                    {
-                        outbuf[i] = 0x00;
-                    }
-
-                    // Read Fan Mode
-                    outbuf[1] = CorsairLightingProtocolConstants.READ_FAN_SPEED;
-                    outbuf[2] = fan_number;
-
-                    // Send the command
-                    stream.Write(outbuf);
-
-                    stream.Read(inbuf);
-                    fan_speed = (inbuf[2] << 8) + inbuf[3];
-                }
-            }
-
-            return fan_speed;
-        }
-
-        //Set the fan mode
         private void Commander_Pro_Set_Fan_Connection_Mode(object sender, SelectionChangedEventArgs e)
         {
-            if (Corsair_Commander_Connected == true)
+            if (Corsair_Commander_Connected != true) return;
+
+            String nam = ((ComboBox)sender).Name;
+            int selected_fan = 0;
+
+            for (int i = 0; i < 6; ++i)
             {
-                String nam = ((ComboBox)sender).Name;
-                byte selected_fan = 0;
-
-                for (int i = 0; i < 6; ++i)
+                if (Fan_Mode_Controls[i].Name == nam)
                 {
-                    if (Fan_Mode_Controls[i].Name == nam)
-                    {
-                        selected_fan = (byte)i;
-                        break;
-                    }
+                    selected_fan = i;
+                    break;
                 }
+            }
 
-                lock (hidLock)
-                {
-                    if (stream == null) return;
+            FanDetectionType type;
+            switch (Fan_Mode_Controls[selected_fan].SelectedIndex)
+            {
+                case 1: type = FanDetectionType.ThreePin; break;
+                case 2: type = FanDetectionType.FourPin; break;
+                case 3: type = FanDetectionType.Disconnected; break;
+                default: type = FanDetectionType.Auto; break;
+            }
 
-                    //clear the output buffer
-                    for (int i = 0; i < 64; ++i)
-                    {
-                        outbuf[i] = 0x00;
-                    }
-
-                    outbuf[1] = CorsairLightingProtocolConstants.WRITE_FAN_DETECTION_TYPE;
-                    outbuf[2] = 0x02;
-                    outbuf[3] = selected_fan;
-
-                    switch (Fan_Mode_Controls[selected_fan].SelectedIndex)
-                    {
-                        case 0:
-                            outbuf[4] = (byte)FanDetectionType.Auto;
-                            break;
-                        case 1:
-                            outbuf[4] = (byte)FanDetectionType.ThreePin;
-                            break;
-                        case 2:
-                            outbuf[4] = (byte)FanDetectionType.FourPin;
-                            break;
-                        case 3:
-                            outbuf[4] = (byte)FanDetectionType.Disconnected;
-                            break;
-                        default:
-                            outbuf[4] = (byte)FanDetectionType.Auto;
-                            break;
-                    }
-
-                    // Send the command
-                    stream.Write(outbuf);
-                    stream.Read(inbuf);
-                    LogHidExchange("WRITE_FAN_DETECTION_TYPE fan=" + (selected_fan + 1) +
-                                   " mode=" + Fan_Mode_Controls[selected_fan].SelectedIndex, 5);
-                }
+            fanModeWriteOk[selected_fan] = commander.WriteFanDetectionType(selected_fan, type);
+            if (!fanModeWriteOk[selected_fan])
+            {
+                SetStatus("● Fan " + (selected_fan + 1) + ": mode change rejected by device",
+                          System.Windows.Media.Brushes.Orange);
             }
         }
 
-        //Set The Fan Speed
-        private void Commander_Pro_Set_Fan_Speed(int fan_channel, int fan_speed)
+        //Set The Fan Speed (fixed RPM target). Returns false when the DEVICE rejected it -
+        //which is what happens when an RPM target is sent to a 3-pin/DC channel.
+        private bool Commander_Pro_Set_Fan_Speed(int fan_channel, int fan_speed)
         {
-            if (Corsair_Commander_Connected == true)
-            {
-                lock (hidLock)
-                {
-                    if (stream == null) return;
-
-                    //clear the output buffer
-                    for (int i = 0; i < 64; ++i)
-                    {
-                        outbuf[i] = 0x00;
-                    }
-
-                    outbuf[1] = CorsairLightingProtocolConstants.WRITE_FAN_SPEED;
-                    outbuf[2] = (byte)fan_channel;
-                    outbuf[3] = (byte)(fan_speed >> 8);  //convert fan speed to big endian
-                    outbuf[4] = (byte)(fan_speed & 0xff); //convert fan speed to big endian
-
-                    // Send the command
-                    stream.Write(outbuf);
-                    stream.Read(inbuf);
-                    LogHidExchange("WRITE_FAN_SPEED fan=" + (fan_channel + 1) + " rpm=" + fan_speed, 5);
-                }
-            }
+            if (Corsair_Commander_Connected != true) return false;
+            return commander.WriteFanSpeed(fan_channel, fan_speed);
         }
 
-        //Trace an HID command and the device's reply. The Commander PRO answers with a status byte
-        //(0x00 OK / 0x01 error) that pCUE historically ignored, so a rejected command looked
-        //identical to a successful one - e.g. an RPM target on a 3-pin channel, which the firmware
-        //does not support. Logging it is what makes that visible.
-        private void LogHidExchange(string what, int outBytes)
+        //Set The Fan Power (duty %). Returns false when the DEVICE rejected it.
+        private bool Commander_Pro_Set_Fan_Power(int fan_channel, int fan_power)
         {
-            byte status = inbuf.Length > 0 ? inbuf[0] : (byte)0xFF;
-            bool ok = status == CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK;
-            string text = what
-                        + "  ->  " + AppLog.Hex(outbuf, outBytes)
-                        + "  <-  " + AppLog.Hex(inbuf, 6)
-                        + (ok ? "  [OK]" : "  [DEVICE REPORTED 0x" + status.ToString("x2") + "]");
-            if (ok) AppLog.Debug(text); else AppLog.Warn(text);
-        }
-
-        //Set The Fan Power
-        private void Commander_Pro_Set_Fan_Power(int fan_channel, int fan_power)
-        {
-            if (Corsair_Commander_Connected == true)
-            {
-                lock (hidLock)
-                {
-                    if (stream == null) return;
-
-                    //clear the output buffer
-                    for (int i = 0; i < 64; ++i)
-                    {
-                        outbuf[i] = 0x00;
-                    }
-
-                    outbuf[1] = CorsairLightingProtocolConstants.WRITE_FAN_POWER;
-                    outbuf[2] = (byte)fan_channel;
-                    outbuf[3] = (byte)(fan_power);
-
-                    // Send the command
-                    stream.Write(outbuf);
-                    stream.Read(inbuf);
-                    LogHidExchange("WRITE_FAN_POWER fan=" + (fan_channel + 1) + " duty=" + fan_power + "%", 4);
-                    if (fan_channel >= 0 && fan_channel <= 5) lastCommandedDuty[fan_channel] = fan_power;
-                }
-            }
+            if (Corsair_Commander_Connected != true) return false;
+            return commander.WriteFanPower(fan_channel, fan_power);
         }
 
         private void Open_Corsair_Commander_Click(object sender, RoutedEventArgs e)
         {
-             string firmware = "";
-
              if (Open_Corsair_Commander.Content.ToString() == "Open")
             {
                 try
@@ -919,82 +555,38 @@ namespace pCUE
                     //kill iCUE services because it messes with the readings
                     Kill_iCUE_Function();
 
-                    //brisko to commander pro kai to anoigo
-                    device = Commander_Loader.GetDevices(0x1b1c, 0x0c10, null, null).First();
+                    //open the Commander PRO session (throws with an operator-readable reason)
+                    commander.Connect();
 
-                    //to brike kai to anoikse
-                    if (device.GetProductName() == "Commander PRO")
+                    Open_Corsair_Commander.Content = "Close";
+                    Corsair_Commander_Connected = true;
+
+                    Commander_SN.Text = commander.FirmwareVersion;
+
+                    Commander_Pro_READ_FAN_MODEs();
+
+                    //show speed at first
+                    for (int i = 0; i < 6; ++i)
                     {
-                        Open_Corsair_Commander.Content = "Close";
-                        Corsair_Commander_Connected = true;                     
-
-                        device.TryOpen(out stream);                    
-                        
-                        //Bound any blocking HID transfer so a stalled device cannot hang the
-                        //background poll loop (or a UI command waiting on hidLock) indefinitely.
-                        if (stream != null)
-                        {
-                            stream.ReadTimeout = 1000;
-                            stream.WriteTimeout = 1000;
-                        }
-
-                        int i = 0;
-
-                        //clear the output buffer
-                        for (i = 0; i < 64; ++i)
-                        {
-                            outbuf[i] = 0x00;
-                        }                    
-
-                        // Get firmware version
-                        outbuf[1] = CorsairLightingProtocolConstants.READ_FIRMWARE_VERSION;
-                        
-                        // Send the command
-                        stream.Write(outbuf);                      
-
-                        //Read the response
-                        stream.Read(inbuf);
-
-                        for (i = 2; i < 5; ++i)
-                        {                            
-                            //memo1.AppendText(inbuf[i].ToString());
-                            if (i>2) {firmware = firmware +"." + inbuf[i];}
-                            else { firmware = firmware + inbuf[i]; }
-                        }
-
-                        Commander_SN.Text = firmware;
-
-                        Commander_Pro_READ_FAN_MODEs();                       
-                        
-                        //substitute for the above function
-                        //show speed at first
-                        for (i = 0; i < 6; ++i)
-                        {
-                            uint rpm = (uint)Commander_Pro_READ_FAN_Speed((byte)i);
-                            Fan_Numeric_Boxes[i].Value = rpm;
-                            Fan_Slider[i].Value = rpm; 
-                            //Fan_Numeric_Boxes[i].Value = (uint)commander_Pro_READ_FAN_Power((byte)i);                          
-                        }
-                    
-                        //Thread.Sleep(100);
-                    
-                        //Fan_Power_Mode.IsEnabled = true;
-                        //Fan_Speed_Mode.IsEnabled = true;
-                        //start polling the fans on a background task
-                        StartFanPolling();
-                        SetStatus("● Connected", System.Windows.Media.Brushes.Lime);
-                                      
+                        uint rpm = (uint)commander.ReadFanRpm(i);
+                        Fan_Numeric_Boxes[i].Value = rpm;
+                        Fan_Slider[i].Value = rpm;
                     }
 
-                    else if (device.GetProductName() != "Commander PRO")
-                    {
-                        //await Task.Delay(100);
-                        MessageBox.Show("Cannot open Commander Pro!");
-                        SetStatus("● Wrong device", System.Windows.Media.Brushes.Orange);
-                    }
-                        
-            }
-                 catch
+                    //start polling the fans on a background task
+                    StartFanPolling();
+                    SetStatus("● Connected", System.Windows.Media.Brushes.Lime);
+                }
+                 catch (CommanderProOpenException ex)
+                {
+                    //Same two outcomes the Open button has always reported.
+                    MessageBox.Show(ex.DeviceFound
+                        ? "Cannot open Commander Pro!"
+                        : "Cannot open Commander Pro! Is it connected?");
+                    DisconnectCommanderPro(ex.DeviceFound ? "● Wrong device" : "● Device not found",
+                                           System.Windows.Media.Brushes.Orange);
+                }
+                catch
                 {
                     MessageBox.Show("Cannot open Commander Pro! Is it connected?");
                     DisconnectCommanderPro("● Device not found", System.Windows.Media.Brushes.Orange);   //shared teardown + UI reset
@@ -1084,6 +676,12 @@ namespace pCUE
                 CPU_array[0].Text = temperature.ToString("0.0");
                 CPU_array[3].Text = clock.ToString("N1");
                 CPU_array[6].Text = load.ToString("N1");
+
+                //Feed the statistics where the values are produced, then render Min/Max (or AVG).
+                stats.Add(StatCpuTemp, temperature);
+                stats.Add(StatCpuClock, clock);
+                stats.Add(StatCpuLoad, load);
+                RenderCpuMinMaxColumns();
             }
             catch (Exception ex)
             {
@@ -1093,18 +691,6 @@ namespace pCUE
         #endregion
 
         #region App Kill functions
-        private static bool IsProcessOpen(string name)
-        {
-            foreach (Process clsProcess in Process.GetProcesses())
-            {
-                if (clsProcess.ProcessName.Contains(name))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
         private void Kill_iCUE_services_Click(object sender, RoutedEventArgs e)
         {
             Kill_iCUE_Function();
@@ -1120,7 +706,6 @@ namespace pCUE
                         || (pr.ProcessName == "Corsair.Service.DisplayAdapter") || (pr.ProcessName == "Corsair.Service"))
                     {
                         pr.Kill(); //KILLS THE PROCESSES
-                        //ForceKill(pr);
                     }
                 }
             }
@@ -1129,277 +714,142 @@ namespace pCUE
                 MessageBox.Show(e.ToString());
             }
         }
-    
-
-        private void Kill_Function(string App)
-        {           
-            Process[] processes = Process.GetProcessesByName(App);
-            foreach (var process in processes)
-            {
-                //process.Kill();
-                ForceKill(process);
-                //break;
-            }
-        }
-
-        public static void ForceKill(Process proc)
-        {
-
-            // Accessing ProcessName could throw an exception if the process has already been killed.
-            string processName = string.Empty;
-            try { processName = proc.ProcessName; } catch (Exception ex) { }
-
-            // ProcessId can be accessed after the process has been killed but we'll do this safely anyways.
-            int pId = 0;
-            try { pId = proc.Id; } catch (Exception ex) { }
-
-            // Will only work if started by this instance of the dll.
-            try { proc.Kill(); } catch (Exception ex) { }
-
-            // Fallback to task kill
-            if (pId > 0)
-            {
-                var taskKilPsi = new ProcessStartInfo("taskkill");
-                taskKilPsi.Arguments = $"/pid {proc.Id} /T /F";
-                taskKilPsi.WindowStyle = ProcessWindowStyle.Hidden;
-                taskKilPsi.UseShellExecute = false;
-                taskKilPsi.RedirectStandardOutput = true;
-                taskKilPsi.RedirectStandardError = true;
-                taskKilPsi.CreateNoWindow = true;
-                var taskKillProc = Process.Start(taskKilPsi);
-                taskKillProc.WaitForExit();
-                String taskKillOutput = taskKillProc.StandardOutput.ReadToEnd(); // Contains success
-                String taskKillErrorOutput = taskKillProc.StandardError.ReadToEnd();
-            }
-
-            // Fallback to wmic delete process.
-            if (!string.IsNullOrEmpty(processName))
-            {
-                // https://stackoverflow.com/a/38757852/591285
-                var wmicPsi = new ProcessStartInfo("wmic");
-                wmicPsi.Arguments = $@"process where ""name='{processName}.exe'"" delete";
-                wmicPsi.WindowStyle = ProcessWindowStyle.Hidden;
-                wmicPsi.UseShellExecute = false;
-                wmicPsi.RedirectStandardOutput = true;
-                wmicPsi.RedirectStandardError = true;
-                wmicPsi.CreateNoWindow = true;
-                var wmicProc = Process.Start(wmicPsi);
-                wmicProc.WaitForExit();
-                String wmicOutput = wmicProc.StandardOutput.ReadToEnd(); // Contains success
-                String wmicErrorOutput = wmicProc.StandardError.ReadToEnd();
-            }
-
-        }
 
         #endregion
+
+        #region Min/Max/Avg statistics
+        //Statistics are computed where each value is produced - the fan poll loop and the CPU
+        //timer call stats.Add(...) and then render - instead of the old scheme of parsing the
+        //Current column's TextBox text back into numbers every 500 ms. Semantics preserved from
+        //the original Set_min_max: only readings > 0 count; Min never regresses to 0; the shared
+        //rollover counter resets everything after ~27.8 hours at 500 ms sampling.
+
+        /// <summary>One series' running min/max/average over its non-zero samples.</summary>
+        private sealed class RunStat
+        {
+            private double _sum;
+            private long _count;
+            private double? _min;
+            private double? _max;
+
+            public double? Min { get { return _min; } }
+            public double? Max { get { return _max; } }
+            public double Average { get { return _count > 0 ? _sum / _count : 0.0; } }
+
+            public void Add(double value)
+            {
+                if (value <= 0 || double.IsNaN(value) || double.IsInfinity(value)) return;
+                _sum += value;
+                _count++;
+                if (_min == null || value < _min.Value) _min = value;
+                if (_max == null || value > _max.Value) _max = value;
+            }
+
+            public void Reset()
+            {
+                _sum = 0; _count = 0; _min = null; _max = null;
+            }
+        }
+
+        /// <summary>
+        /// All series plus the shared rollover counter of the original implementation: after
+        /// 100,000 counted samples (about 27.8 h at the 500 ms cadence) every figure resets.
+        /// </summary>
+        private sealed class RunStatSet
+        {
+            private const int RolloverSamples = 100000;
+            private readonly RunStat[] _items;
+            private int _counted;
+
+            public RunStatSet(int seriesCount)
+            {
+                _items = new RunStat[seriesCount];
+                for (int i = 0; i < seriesCount; i++) _items[i] = new RunStat();
+            }
+
+            public void Add(int series, double value)
+            {
+                if (series < 0 || series >= _items.Length) return;
+                if (_counted >= RolloverSamples) Reset();
+                if (value > 0) _counted++;
+                _items[series].Add(value);
+            }
+
+            public double Min(int series)
+            {
+                return InRange(series) && _items[series].Min.HasValue ? _items[series].Min.Value : 0.0;
+            }
+
+            public double Max(int series)
+            {
+                return InRange(series) && _items[series].Max.HasValue ? _items[series].Max.Value : 0.0;
+            }
+
+            public double Average(int series)
+            {
+                return InRange(series) ? _items[series].Average : 0.0;
+            }
+
+            private bool InRange(int series) { return series >= 0 && series < _items.Length; }
+
+            public void Reset()
+            {
+                _counted = 0;
+                foreach (RunStat s in _items) s.Reset();
+            }
+        }
+
+        /// <summary>Formats a stat the way the Current column formats it, so Min/Max match.</summary>
+        private string FormatStat(int series, double value)
+        {
+            switch (series)
+            {
+                case StatCpuTemp: return value.ToString("0.0");
+                case StatCpuClock: return value.ToString("N1");
+                case StatCpuLoad: return value.ToString("N1");
+                default: return Math.Round(value).ToString();   // fan RPMs are integers
+            }
+        }
+
+        //CPU row: middle box shows the real Min, or the running average when "Average Values" is
+        //ticked (that checkbox only ever affected the CPU row - fans have their own Avg column).
+        private void RenderCpuMinMaxColumns()
+        {
+            bool showAvg = AVG_values.IsChecked == true;
+            CPU_array[1].Text = showAvg
+                ? stats.Average(StatCpuTemp).ToString("0.#")
+                : FormatStat(StatCpuTemp, stats.Min(StatCpuTemp));
+            CPU_array[2].Text = FormatStat(StatCpuTemp, stats.Max(StatCpuTemp));
+
+            CPU_array[4].Text = showAvg
+                ? stats.Average(StatCpuClock).ToString("0.#")
+                : FormatStat(StatCpuClock, stats.Min(StatCpuClock));
+            CPU_array[5].Text = FormatStat(StatCpuClock, stats.Max(StatCpuClock));
+
+            CPU_array[7].Text = showAvg
+                ? stats.Average(StatCpuLoad).ToString("0.#")
+                : FormatStat(StatCpuLoad, stats.Min(StatCpuLoad));
+            CPU_array[8].Text = FormatStat(StatCpuLoad, stats.Max(StatCpuLoad));
+        }
+
+        //Fan rows: Min/Max always hold the real extremes (a 0 means "no sample" and never moves
+        //them - RunStat.Add enforces that), and the dedicated Avg column is refreshed alongside.
+        private void RenderFanMinMaxColumns()
+        {
+            for (int ch = 0; ch < 6; ch++)
+            {
+                Fan_array[ch * 3 + 1].Text = FormatStat(StatFanBase + ch, stats.Min(StatFanBase + ch));
+                Fan_array[ch * 3 + 2].Text = FormatStat(StatFanBase + ch, stats.Max(StatFanBase + ch));
+            }
+            Set_Fan_Average_Column();
+        }
 
         //initialize all counters and AVG/Overall values
         public void Initialize_all_values()
         {
-            counter_min_max_avg = 0;
-
-            //initialize all counters and AVG/Overall values
-            CPU_temp_counter_min_max_avg = 0;
-            CPU_MHz_counter_min_max_avg = 0;
-            CPU_Load_counter_min_max_avg = 0;
-            avg_fan1_counter_min_max_avg = 0;
-            avg_fan2_counter_min_max_avg = 0;
-            avg_fan3_counter_min_max_avg = 0;
-            avg_fan4_counter_min_max_avg = 0;
-            avg_fan5_counter_min_max_avg = 0;
-            avg_fan6_counter_min_max_avg = 0;
-
-            avg_CPU_temp = 0.0;
-            avg_CPU_MHz = 0.0;
-            avg_CPU_Load = 0.0;
-            avg_fan1_speed = 0.0;
-            avg_fan2_speed = 0.0;
-            avg_fan3_speed = 0.0;
-            avg_fan4_speed = 0.0;
-            avg_fan5_speed = 0.0;
-            avg_fan6_speed = 0.0;
-
-            overal_CPU_temp = 0.0;
-            overal_CPU_MHz = 0.0;
-            overal_CPU_Load = 0.0;
-            overal_fan1_speed = 0.0;
-            overal_fan2_speed = 0.0;
-            overal_fan3_speed = 0.0;
-            overal_fan4_speed = 0.0;
-            overal_fan5_speed = 0.0;
-            overal_fan6_speed = 0.0;
+            stats.Reset();
         }
-
-        public void Set_min_max(int current, int min, int max, int Grid)
-        {                   
-
-            //List to use depending on the Grid
-            List<TextBox> Sample_array = new List<TextBox>();
-
-            // with 500 samples per sec this is 27.8 hours
-            if (counter_min_max_avg >= 100000)
-            {
-                Initialize_all_values();
-            }
-
-            // Select the Grid that I will have as input
-            if (Grid == 1) { Sample_array = CPU_array; }
-            else if (Grid == 2) { Sample_array = Fan_array; }
-
-            try
-            {
-
-                if ((Sample_array[current].Text != null) && (Sample_array[min].Text != null) && (Sample_array[max].Text != null))
-                {
-
-                    if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                    {
-                        counter_min_max_avg += 1;
-
-                        if ((current == 0) && (Grid ==1))
-                        {
-                           if (Convert.ToDouble(Sample_array[current].Text)>0)
-                           { 
-                            CPU_temp_counter_min_max_avg += 1;
-                            overal_CPU_temp += Convert.ToDouble(Sample_array[current].Text);
-                            avg_CPU_temp = overal_CPU_temp / CPU_temp_counter_min_max_avg;
-                           }
-                        }                        
-
-                        else if ((current == 3) && (Grid == 1))
-                        {
-                            if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                            { 
-                            CPU_MHz_counter_min_max_avg += 1;
-                            overal_CPU_MHz += Convert.ToDouble(Sample_array[current].Text);
-                            avg_CPU_MHz = overal_CPU_MHz / CPU_MHz_counter_min_max_avg;
-                            }
-                        }
-
-                        else if ((current == 6) && (Grid == 1))
-                        {
-                            if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                            {
-                            CPU_Load_counter_min_max_avg += 1;
-                            overal_CPU_Load += Convert.ToDouble(Sample_array[current].Text);
-                            avg_CPU_Load = overal_CPU_Load / CPU_Load_counter_min_max_avg;
-                            }
-                        }
-
-                        else if ((current == 0) && (Grid == 2))
-                        {
-                            if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                            {
-                                avg_fan1_counter_min_max_avg += 1;
-                                overal_fan1_speed += Convert.ToDouble(Sample_array[current].Text);
-                                avg_fan1_speed = overal_fan1_speed / avg_fan1_counter_min_max_avg;
-                            }
-                        }
-
-                        else if ((current == 3) && (Grid == 2))
-                        {
-                            if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                            {
-                                avg_fan2_counter_min_max_avg += 1;
-                                overal_fan2_speed += Convert.ToDouble(Sample_array[current].Text);
-                                avg_fan2_speed = overal_fan2_speed / avg_fan2_counter_min_max_avg;
-                            }
-                        }
-
-                        else if ((current == 6) && (Grid == 2))
-                        {
-                            if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                            {
-                                avg_fan3_counter_min_max_avg += 1;
-                                overal_fan3_speed += Convert.ToDouble(Sample_array[current].Text);
-                                avg_fan3_speed = overal_fan3_speed / avg_fan3_counter_min_max_avg;
-                            }
-                        }
-
-                        else if ((current == 9) && (Grid == 2))
-                        {
-                            if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                            {
-                                avg_fan4_counter_min_max_avg += 1;
-                                overal_fan4_speed += Convert.ToDouble(Sample_array[current].Text);
-                                avg_fan4_speed = overal_fan4_speed / avg_fan4_counter_min_max_avg;
-                            }
-                        }
-
-                        else if ((current == 12) && (Grid == 2))
-                        {
-                            if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                            {
-                                avg_fan5_counter_min_max_avg += 1;
-                                overal_fan5_speed += Convert.ToDouble(Sample_array[current].Text);
-                                avg_fan5_speed = overal_fan5_speed / avg_fan5_counter_min_max_avg;
-                            }
-                        }
-
-                        else if ((current == 15) && (Grid == 2))
-                        {
-                            if (Convert.ToDouble(Sample_array[current].Text) > 0)
-                            {
-                                avg_fan6_counter_min_max_avg += 1;
-                                overal_fan6_speed += Convert.ToDouble(Sample_array[current].Text);
-                                avg_fan6_speed = overal_fan6_speed / avg_fan6_counter_min_max_avg;
-                            }
-                        }
-                    }
-
-                    // Min column:
-                    //  - Fans (Grid 2) always keep the real Min; their running Average has its own column now.
-                    //  - CPU (Grid 1) shows the real Min, or the running Average when the "Average Values" box is ticked.
-                    //
-                    // Only a reading > 0 may move Min. A 0 means "no sample" here (an unpopulated
-                    // Commander channel, or a bench tachometer whose signal went stale), and this
-                    // block already treats 0 in the Min box as "unset" - so without this guard a
-                    // single 0 would overwrite an established minimum and then be re-seeded from
-                    // the next reading, permanently losing the real minimum for the run.
-                    if (((Grid == 2) || (AVG_values.IsChecked == false))
-                        && (Convert.ToDouble(Sample_array[current].Text) > 0))
-                    {
-                        if (Convert.ToDouble(Sample_array[min].Text) == 0)
-                        {
-                            Sample_array[min].Text = Sample_array[current].Text;
-                        }
-
-                        else if (Convert.ToDouble(Sample_array[current].Text) < Convert.ToDouble(Sample_array[min].Text))
-                        {
-                            Sample_array[min].Text = Sample_array[current].Text;
-                        }
-                    }
-
-                    // CPU + "Average Values" ticked -> show the CPU average in the Min column
-                    else
-                    {
-                        switch (current)
-                        {
-                            case 0:
-                                Sample_array[min].Text = avg_CPU_temp.ToString("0.#");
-                                break;
-                            case 3:
-                                Sample_array[min].Text = avg_CPU_MHz.ToString("0.#");
-                                break;
-                            case 6:
-                                Sample_array[min].Text = avg_CPU_Load.ToString("0.#");
-                                break;
-                        }
-                    }
-
-                      if (Convert.ToDouble(Sample_array[current].Text) > Convert.ToDouble(Sample_array[max].Text))
-                    {
-                        Sample_array[max].Text = Sample_array[current].Text;
-                    }
-                  
-                }
-            }
-
-            catch 
-            { 
-                //Not implemented
-            }
-        }
+        #endregion
 
         private void Fan_Numeric_ValueChanged(object sender, RoutedPropertyChangedEventArgs<uint> e)
         {
@@ -1443,7 +893,7 @@ namespace pCUE
                 Fan5_Numeric.Value = Convert.ToUInt32(Fan5_Slider.Value);
                 Fan6_Numeric.Value = Convert.ToUInt32(Fan6_Slider.Value);
             }
-        }  
+        }
 
         //for the Average Values CheckBox
         private void Average_Values(object sender, RoutedEventArgs e)
@@ -1460,7 +910,8 @@ namespace pCUE
                 Properties.Settings.Default.AVG_Values = false;
                 Properties.Settings.Default.Save();
             }
-        }      
+            RenderCpuMinMaxColumns();   //swap the middle column immediately, not on the next sample
+        }
 
         private void Reset_Button_Click(object sender, RoutedEventArgs e)
         {
@@ -1482,23 +933,44 @@ namespace pCUE
             else { CPU_array[i].Text = "00.00"; }
         }
             //for the AVG values
-            Initialize_all_values();           
-        }       
+            Initialize_all_values();
+            Set_Fan_Average_Column();   //the Avg column is not part of Fan_array - clear it too
+        }
 
         private void Set_Fan_Speed_Click(object sender, RoutedEventArgs e)
         {
+            //Checked here, not per-fan: the wrappers' false means "the DEVICE refused", and a
+            //pre-connect click would otherwise report all six fans as rejected.
+            if (!Corsair_Commander_Connected)
+            {
+                SetStatus("● Commander PRO not connected", System.Windows.Media.Brushes.Orange);
+                return;
+            }
+
             //Any running loop is superseded by this press - either it is restarted below with the
             //newly typed target, or the user has switched that fan back to plain duty.
             StopRpmHold("Set Speed pressed");
 
+            var rejected = new List<string>();
             for (int i = 0; i <= 5; i++)
             {
-                Set_Fan_Speed_Function_Commander_Pro(i);
+                if (!Set_Fan_Speed_Function_Commander_Pro(i)) rejected.Add("fan " + (i + 1));
+            }
+
+            //The status byte now matters: a rejection means the DEVICE said no - typically a
+            //fixed-RPM target on a 3-pin/DC channel, which its firmware does not support. That
+            //used to look identical to success and cost bench time.
+            if (rejected.Count > 0)
+            {
+                SetStatus("● Rejected by device: " + string.Join(", ", rejected) +
+                          " (RPM targets need a 4-pin/PWM channel)",
+                          System.Windows.Media.Brushes.Orange);
             }
         }
 
-        //With this function I am able to set the fans separately, either with speed or power
-        private void Set_Fan_Speed_Function_Commander_Pro(int fan)
+        //With this function I am able to set the fans separately, either with speed or power.
+        //Returns false when the device rejected the command.
+        private bool Set_Fan_Speed_Function_Commander_Pro(int fan)
         {
 
             int fan_speed = 0;
@@ -1507,7 +979,8 @@ namespace pCUE
 
             if (fan_speed <= 100) //Gia to Power
                 {
-                    Commander_Pro_Set_Fan_Power(fan, fan_speed);
+                    //0 is a real command here: it drives the channel to 0% duty (fan stop).
+                    return Commander_Pro_Set_Fan_Power(fan, fan_speed);
                 }
 
                 else if (fan_speed > 100) //Gia to Speed
@@ -1515,21 +988,26 @@ namespace pCUE
                     //"Adjust fan speed from Tacho" ticked, and this is the fan the tachometer is on:
                     //hold the typed RPM with the software loop instead of asking the Commander,
                     //which cannot regulate by RPM without a tach signal of its own.
+                    //True either way - StartRpmHold reports its own refusal reasons in the hold
+                    //status line, and they must not be mislabelled as device rejections.
                     if (Tacho_Adjust_CheckBox.IsChecked == true && fan == tachAssignedChannel)
                     {
                         StartRpmHold(fan, fan_speed);
+                        return true;
                     }
                     else
                     {
-                        Commander_Pro_Set_Fan_Speed(fan, fan_speed);
+                        return Commander_Pro_Set_Fan_Speed(fan, fan_speed);
                     }
                 }
+
+            return true;   // unreachable: UIntegerUpDown cannot go below 0
         }
 
         #region Remote control API (IRemoteControlTarget)
         //Every member here can be called from an HTTP worker thread, so anything that touches WPF
         //or shared UI state is marshalled onto the UI thread with Dispatcher.Invoke. The HID calls
-        //themselves are already serialized by hidLock and are safe from any thread.
+        //themselves are serialized inside CommanderProDevice and are safe from any thread.
 
         //Fan numbers are 1-6 on the wire (matching the UI labels); channels are 0-5 internally.
         private static bool TryChannel(int fan, out int channel, out string error)
@@ -1555,7 +1033,7 @@ namespace pCUE
                     lock (fanRpmLock) rpm = latestFanRpm[ch];
 
                     string mode = "unknown";
-                    if (ch < Fan_Mode_Controls.Count)
+                    if (ch < Fan_Mode_Controls.Length)
                     {
                         switch (Fan_Mode_Controls[ch].SelectedIndex)
                         {
@@ -1571,11 +1049,30 @@ namespace pCUE
                         fan = ch + 1,
                         rpm,
                         mode,
-                        setpoint = ch < Fan_Numeric_Boxes.Count ? (int)Fan_Numeric_Boxes[ch].Value : 0,
+                        setpoint = ch < Fan_Numeric_Boxes.Length ? (int)Fan_Numeric_Boxes[ch].Value : 0,
                     });
                 }
 
                 double? tachRpm = bench_tach != null && bench_tach.IsConnected ? bench_tach.ReadRpm() : null;
+
+                //The duty reported here must be honest about its source. The old behaviour - always
+                //reporting the hold controller's last value even after it stopped - once showed 32%
+                //while the fan really ran at ~50%, and cost bench time. While a hold runs the
+                //controller's value IS live; otherwise report what pCUE last commanded on that
+                //channel, or nothing at all when this session never has.
+                int? holdDuty;
+                string dutySource;
+                if (rpmHold != null && rpmHold.IsRunning)
+                {
+                    holdDuty = rpmHold.CurrentDuty;
+                    dutySource = "loop";
+                }
+                else
+                {
+                    int tracked = commander.LastCommandedDuty(holdChannel);
+                    holdDuty = tracked >= 0 ? (int?)tracked : null;
+                    dutySource = tracked >= 0 ? "tracked" : "unknown";
+                }
 
                 return new
                 {
@@ -1588,9 +1085,9 @@ namespace pCUE
                     },
                     cpu = new
                     {
-                        temperature = CPU_array.Count > 0 ? CPU_array[0].Text : null,
-                        mhz = CPU_array.Count > 3 ? CPU_array[3].Text : null,
-                        load = CPU_array.Count > 6 ? CPU_array[6].Text : null,
+                        temperature = CPU_array.Length > 0 ? CPU_array[0].Text : null,
+                        mhz = CPU_array.Length > 3 ? CPU_array[3].Text : null,
+                        load = CPU_array.Length > 6 ? CPU_array[6].Text : null,
                         monitoring = CpuDataTimer.Enabled,
                     },
                     fans,
@@ -1606,7 +1103,8 @@ namespace pCUE
                         running = rpmHold != null && rpmHold.IsRunning,
                         status = rpmHold != null ? rpmHold.Status.ToString() : FanHoldStatus.Idle.ToString(),
                         fan = holdChannel >= 0 ? (int?)(holdChannel + 1) : null,
-                        duty = rpmHold != null ? rpmHold.CurrentDuty : 0,
+                        duty = holdDuty,                    // null when this session never set one
+                        dutySource,
                         target = (int)holdConfig.TargetRpm,
                         tachoAdjust = Tacho_Adjust_CheckBox.IsChecked == true,
                     },
@@ -1622,7 +1120,8 @@ namespace pCUE
 
             //A remote duty command is the caller taking over from the hold loop.
             Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote duty command"); }));
-            Commander_Pro_Set_Fan_Power(channel, duty);
+            if (!Commander_Pro_Set_Fan_Power(channel, duty))
+                return "device rejected WRITE_FAN_POWER for fan " + fan + ".";
             return null;
         }
 
@@ -1633,7 +1132,9 @@ namespace pCUE
             if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
 
             Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote rpm command"); }));
-            Commander_Pro_Set_Fan_Speed(channel, rpm);
+            if (!Commander_Pro_Set_Fan_Speed(channel, rpm))
+                return "device rejected WRITE_FAN_SPEED for fan " + fan +
+                       " - fixed RPM needs a 4-pin/PWM channel.";
             return null;
         }
 
@@ -1654,6 +1155,8 @@ namespace pCUE
 
             //Setting SelectedIndex raises SelectionChanged, which is what writes to the device.
             Dispatcher.Invoke(new Action(delegate { Fan_Mode_Controls[channel].SelectedIndex = index; }));
+            if (!fanModeWriteOk[channel])
+                return "device rejected the mode change for fan " + fan + ".";
             return null;
         }
 
@@ -1700,6 +1203,7 @@ namespace pCUE
                 holdConfig.TimeoutMs,
                 holdConfig.RpmFilterWindow,
                 holdConfig.MaxInvalidRpmSamples,
+                holdConfig.DitherEnabled,
             };
         }
 
@@ -1723,11 +1227,17 @@ namespace pCUE
             if ((v = get("timeout")).HasValue) holdConfig.TimeoutMs = (int)v.Value;
             if ((v = get("filterWindow")).HasValue) holdConfig.RpmFilterWindow = Math.Max(1, (int)v.Value);
             if ((v = get("maxInvalid")).HasValue) holdConfig.MaxInvalidRpmSamples = Math.Max(1, (int)v.Value);
+            if ((v = get("dither")).HasValue)
+            {
+                bool want = v.Value != 0;
+                AppLog.Info("Hold dither " + (want ? "enabled" : "disabled") + " via remote API.");
+                holdConfig.DitherEnabled = want;
+            }
 
             if ((v = get("target")).HasValue)
             {
                 holdConfig.TargetRpm = v.Value;
-                if (holdChannel >= 0 && holdChannel < Fan_Numeric_Boxes.Count)
+                if (holdChannel >= 0 && holdChannel < Fan_Numeric_Boxes.Length)
                     Dispatcher.Invoke(new Action(delegate { Fan_Numeric_Boxes[holdChannel].Value = (uint)v.Value; }));
                 if (rpmHold != null && rpmHold.IsRunning) rpmHold.UpdateTarget(v.Value);
             }
@@ -2090,8 +1600,20 @@ namespace pCUE
             //400 RPM while the fan sat at 350 first threw it up past 1100 RPM and then needed about
             //seven coarse steps to walk back down - roughly half a minute of travel for a 50 RPM
             //change. Starting where the fan is makes a small change a couple of 1% steps.
-            int knownDuty = lastCommandedDuty[channel];
-            int reportedDuty = Commander_Pro_READ_FAN_Power((byte)channel);
+            int knownDuty = commander.LastCommandedDuty(channel);
+            int reportedDuty = commander.ReadFanPower(channel);
+
+            //A 0 read-back while pCUE has no tracked duty AND the fan is turning is suspicious -
+            //a spinning fan at a real 0% duty is not physically plausible - so retry once before
+            //degrading to the 40% kick (a failed READ_FAN_POWER used to look identical to a
+            //genuine 0% and kicked a perfectly good fan).
+            bool suspiciousRead = knownDuty < 0 && reportedDuty == 0 && ReadHeldFanRpm() != null;
+            if (suspiciousRead)
+            {
+                reportedDuty = commander.ReadFanPower(channel);
+                AppLog.Warn("HOLD start duty: Commander reported 0% with the fan turning - re-read gave " +
+                            reportedDuty + "%");
+            }
 
             //Both sources are logged every time, not just the one used: it is the only way to see
             //the device read-back agreeing (or not) with what pCUE believes it commanded.
@@ -2111,6 +1633,9 @@ namespace pCUE
             }
             else
             {
+                if (suspiciousRead && reportedDuty == 0)
+                    AppLog.Warn("HOLD starting from " + HoldKickStartDuty + "% kick: both duty reads returned 0 " +
+                                "while the fan was turning - check the channel.");
                 holdConfig.StartDuty = HoldKickStartDuty;
                 holdConfig.StartDutyIsCurrent = false;
             }
@@ -2118,7 +1643,14 @@ namespace pCUE
             holdConfig.TargetRpm = targetRpm;
 
             rpmHold = new FanRpmHoldController(
-                duty => Commander_Pro_Set_Fan_Power(holdChannel, duty),
+                duty =>
+                {
+                    //A rejected write must stop the loop rather than let it steer blindly:
+                    //the controller catches this and faults out with the reason.
+                    if (!Commander_Pro_Set_Fan_Power(holdChannel, duty))
+                        throw new InvalidOperationException(
+                            "Commander PRO rejected the duty write for fan " + (holdChannel + 1) + ".");
+                },
                 ReadHeldFanRpm,
                 () => Corsair_Commander_Connected);
 
@@ -2427,7 +1959,6 @@ namespace pCUE
 
         private void Startup(bool add)
         {
-            isinstartup = add;
             RegistryKey key = Registry.CurrentUser.OpenSubKey(
                        @"Software\Microsoft\Windows\CurrentVersion\Run", true);
             if (add)
@@ -2441,7 +1972,7 @@ namespace pCUE
 
             key.Close();
         }
-   
+
         private void Autostart(object sender, RoutedEventArgs e)
         {
             if (autostartCheckBox.IsChecked == true)
@@ -2483,6 +2014,6 @@ namespace pCUE
             }
         }
 
-    }  
+    }
 }
 
