@@ -251,6 +251,25 @@ expected and harmless, but it is the exact shape that made 1.4.1 declare a false
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-08-25 (latest) — Shipped as 1.5.3: PR #3 merged, release published, manifest updated
+The whole 2026-08-25 body of work (extraction, status byte, dithering, stats, hygiene, plus the
+six codex-review fixes) was committed as one change (`b043192`, +918/−2628), merged via
+**PR #3** into master (`87ae43e`), and published:
+
+- **Release**: https://github.com/crmaris/pCUE/releases/tag/v1.5.3 — title "pCUE 1.5.3", assets
+  `pCUE_1.5.3_setup.exe` (2604656 B) and `pCUE_1.5.3_portable.zip`. GitHub's server-side asset
+  digest for the setup exe matches the manifest sha256 (`5B39BF…CE1C`); both assets answer
+  HEAD 200 anonymously.
+- **Updater manifest**: crmaris/powenetics-updates `components.json` → apps.pcue bumped to
+  version 1.5.3 / v1.5.3 asset url / new sha256 (commit `10dd190`). Verified via the contents API;
+  note `raw.githubusercontent.com` served the stale 1.5.x entry for some minutes after the PUT
+  (normal CDN lag — the updater harmlessly sees "current" until it refreshes).
+- Artifacts were built from the exact merged tree by `build/pack-release.ps1` (full local CI green
+  immediately before). Installer remains UNSIGNED.
+- **Bench checklist unchanged and still owed**: descending convergence AND live retarget with
+  dither ON; RPM target on a 3-pin channel must show rejection; hold across an app restart (retry
+  Warn line); `/status` after Stop shows `duty: null`.
+
 ### 2026-08-25 (later) — Codex cross-review, six fixes, repack as 1.5.3
 A read-only `codex exec` review (`gpt-5.6-sol`, xhigh) over the uncommitted diff + new
 `CommanderProDevice.cs` found no CRITICALs and 2 MAJOR / 2 MINOR / 2 NIT — all verified against
