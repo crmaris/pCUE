@@ -234,6 +234,46 @@ Every test above happened to start from a speed **below** the target, which is e
 expected and harmless, but it is the exact shape that made 1.4.1 declare a false `Stable`, so don't
 "tidy" the reversal handling without re-running the descending case.
 
+## Bench validation OWED for 1.5.3 — run this at the bench
+The 2026-08-25 work (status-byte enforcement, sub-1% dithering, honest `/status`, read-back retry)
+has **never touched real hardware**. Until these pass, do not trust new hold runs or quote
+rejection behaviour as verified.
+
+**Preconditions**
+1. Power the bench PC (`192.168.1.20`) with the Commander PRO + tachometer attached.
+2. Start pCUE there; the updater offers **1.5.3** — install it (needs one click at the bench by
+   design). Confirm: `Invoke-RestMethod http://192.168.1.20:5056/status` shows `version 1.5.3`
+   (older builds silently lack everything below).
+3. Remote must be enabled on that instance (it was last time).
+
+**Automated (checks A, B, D)** — from any machine on the LAN, repo checkout:
+```
+pwsh tools\bench-validate.ps1 -Server 192.168.1.20
+```
+It prints a PASS/FAIL/SKIP table and dumps evidence to `%TEMP%\pcue-bench\<stamp>\`:
+- **A — 3-pin RPM rejection**: an RPM target on a 3-pin channel must come back HTTP 400 naming
+  `WRITE_FAN_SPEED`, with a `[DEVICE REJECTED …]` line in `/log`. On the bench PC itself the
+  Status_Label should also show the orange "Rejected by device" text — eyeball it while you're there.
+- **B — descending convergence + live retarget under dither**: holds fan to 1200 rpm, then LIVE-
+  retargets to 1050 mid-run. Passes when both phases reach `Stable` within ±35 rpm. The log tail
+  should contain `dither engaged` and/or a bracket-drop/resume line; the descending shape will
+  undershoot then climb back (see the 2026-08-08 table above) — that is correct.
+- **D — post-Stop honesty**: after Stop, `/status` reports the last ACCEPTED duty with
+  `dutySource: "tracked"` (never a stale loop value; `null` only before any command this session).
+The harness restores the tachometer assignment afterwards and changes no channel modes.
+
+**Manual (checks C + eyes)**:
+- **C — hold across an app restart**: with a fan left running at some duty, close and reopen pCUE,
+  reconnect, start the same hold. Pass = log says `HOLD start duty: … Commander reports=N%` with N
+  ≈ the real duty (no 40% kick). A `re-read gave N%` Warn line means the retry path fired — fine;
+  note it.
+- While B runs, watch the Hold status label cycle Ramping → Stabilizing → Stable and settle in
+  under ~90 s per phase.
+
+**Then**: paste the summary table + evidence folder into a session-log entry here (win = record,
+fail = attach `B_phase*.json` timelines). If A SKIPs because no channel is 3-pin, set one mode to
+3-pin first and rerun — that is the one state the harness cannot create safely on its own.
+
 ## UI conventions worth keeping
 - **The fan numeric box is deliberately overloaded**: `≤100` = power %, `>100` = RPM. No real fan
   runs below 100 RPM, so the split is unambiguous. Don't "fix" it with a mode selector.
