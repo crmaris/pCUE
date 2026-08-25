@@ -48,10 +48,18 @@ protocol.
   the device's reply carries `0x01`; the UI shows "Rejected by device" and the remote API returns
   the error to its caller. A rejected command no longer looks like success anywhere.
 - **The status byte is `_in[1]`, NOT `_in[0]`** (fixed 2026-08-25, see session log). `_in[0]` is the
-  HID **report id** — HidSharp carries it in byte 0 of *both* directions, which is exactly why every
-  command is written to `_out[1]`. So the device payload starts at `_in[1]` (status) and the first
-  DATA byte is `_in[2]`, which is why every read here is one index higher than liquidctl's
-  (`res[0]` status, `res[1:3]` RPM, `res[1..3]` firmware — `res` has no report id).
+  HID **report id**. HidSharp 2.1's own XML docs settle it — `HidStream.Read`: *"The buffer to fill.
+  Place the Report ID in the first byte."*, and `HidDevice.GetMaxInputReportLength`: *"including the
+  Report ID byte. If the device does not use Report IDs, the first byte will always be 0."* The
+  Commander PRO does not use report ids, so **`_in[0]` is always `0x00`** — which is also
+  `PROTOCOL_RESPONSE_OK`, so a check against it can never fail.
+  The device payload therefore starts at `_in[1]` (status) and the first DATA byte is `_in[2]`,
+  which is why every read here is one index higher than liquidctl's (`res[0]` status, `res[1:3]`
+  RPM, `res[1..3]` firmware — `res` carries no report id).
+  Cross-checked against the **Case Tests Project** (`E:\All projects\Case Tests Project Corsair
+  Commander Real System\Form1.cs`), an independent Commander PRO app: identical indices, and it
+  never reads `inbuf[0]` or `inbuf[1]` at all. Neither app ever validated the status byte, which is
+  why the wrong index survived so long.
   **Do not "simplify" any of these indices without re-deriving that offset.**
 
 ## Closed-loop RPM hold (`pCUE/Control/FanRpmHoldController.cs`)
