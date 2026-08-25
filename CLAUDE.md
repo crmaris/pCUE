@@ -329,9 +329,15 @@ is logged loudly (`[UNEXPECTED STATUS 0x..]`) and treated as OK, so if the frami
 is assumed the app degrades to the old behaviour instead of reporting every healthy write as
 rejected — which would be far worse than missing a rejection.
 
+**Shipped as 1.5.4** — release `v1.5.4` on crmaris/pCUE, manifest `apps.pcue` bumped to 1.5.4 /
+sha256 `352BD4…5068`. The published asset was downloaded anonymously and re-hashed against the
+manifest before this was called done.
+
 **BENCH-UNTESTED** (bench powered off). The check already on the owed list now discriminates:
 commanding an RPM on a 3-pin channel should log `[DEVICE REJECTED 0x01]` where it previously always
-logged `[OK]`. That one test confirms or refutes the whole fix.
+logged `[OK]`. That one test confirms or refutes the whole fix. If the framing were somehow still
+wrong the defensive path logs `[UNEXPECTED STATUS 0x..]` and treats it as OK, so the worst case is
+the old behaviour rather than every healthy write reported as rejected.
 
 ### 2026-08-25 — Shipped as 1.5.3: PR #3 merged, release published, manifest updated
 The whole 2026-08-25 body of work (extraction, status byte, dithering, stats, hygiene, plus the
