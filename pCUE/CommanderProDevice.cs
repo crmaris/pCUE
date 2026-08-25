@@ -267,14 +267,36 @@ namespace pCUE
         /// </summary>
         private bool LogExchange(string what, int outBytes)
         {
-            byte status = _in.Length > 0 ? _in[0] : (byte)0xFF;
-            bool ok = status == CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK;
+            // _in[0] is the HID REPORT ID, not the status. HidSharp carries the report id in byte 0
+            // of both directions - which is exactly why every command here is written to _out[1] -
+            // so the device's payload starts at _in[1], and the status byte is the first byte of
+            // that payload. The reads corroborate it: they all take their first DATA byte from
+            // _in[2], one past the status. (liquidctl, working from a buffer with no report id,
+            // reads fan RPM at res[1:3] with res[0] as the status; every index here is one higher.)
+            //
+            // Reading _in[0] compared the report id - always 0x00, always equal to
+            // PROTOCOL_RESPONSE_OK - so the check could never fail and every write was reported as
+            // accepted no matter what the Commander said.
+            byte status = _in.Length > 1 ? _in[1] : (byte)0xFF;
+
+            // Only an explicit 0x01 is a refusal. Anything else unexpected means the framing is not
+            // what is assumed here, and announcing "rejected" at a fan that is running perfectly
+            // would be worse than missing a rejection - it is logged loudly and treated as OK, so a
+            // wrong assumption degrades to the old behaviour instead of breaking every write.
+            bool rejected = status == CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_ERROR;
+            bool unexpected = !rejected && status != CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK;
+            bool ok = !rejected;
+
+            string verdict;
+            if (rejected) verdict = "  [DEVICE REJECTED 0x" + status.ToString("x2") + "]";
+            else if (unexpected) verdict = "  [UNEXPECTED STATUS 0x" + status.ToString("x2") + " - treated as OK]";
+            else verdict = "  [OK]";
+
             string text = what
                         + "  ->  " + AppLog.Hex(_out, outBytes)
                         + "  <-  " + AppLog.Hex(_in, 6)
-                        + (ok ? "  [OK]"
-                             : "  [DEVICE REJECTED 0x" + status.ToString("x2") + "]");
-            if (ok) AppLog.Debug(text); else AppLog.Warn(text);
+                        + verdict;
+            if (ok && !unexpected) AppLog.Debug(text); else AppLog.Warn(text);
             return ok;
         }
     }
