@@ -47,6 +47,12 @@ protocol.
 - **Every write is status-checked (2026-08-25).** `CommanderProDevice.WriteFan*` returns false when
   the device's reply carries `0x01`; the UI shows "Rejected by device" and the remote API returns
   the error to its caller. A rejected command no longer looks like success anywhere.
+- **The status byte is `_in[1]`, NOT `_in[0]`** (fixed 2026-08-25, see session log). `_in[0]` is the
+  HID **report id** — HidSharp carries it in byte 0 of *both* directions, which is exactly why every
+  command is written to `_out[1]`. So the device payload starts at `_in[1]` (status) and the first
+  DATA byte is `_in[2]`, which is why every read here is one index higher than liquidctl's
+  (`res[0]` status, `res[1:3]` RPM, `res[1..3]` firmware — `res` has no report id).
+  **Do not "simplify" any of these indices without re-deriving that offset.**
 
 ## Closed-loop RPM hold (`pCUE/Control/FanRpmHoldController.cs`)
 Because the Commander will not regulate by RPM on a DC channel, pCUE closes that loop in software:
@@ -291,7 +297,35 @@ fail = attach `B_phase*.json` timelines). If A SKIPs because no channel is 3-pin
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
-### 2026-08-25 (latest) — Shipped as 1.5.3: PR #3 merged, release published, manifest updated
+### 2026-08-25 (latest) — The status-byte check was reading the report id, so it never fired
+Verifying the 1.5.3 work found that **enforcing the status byte was inert**. `LogExchange` read
+`_in[0]`, which is the HID **report id** — always `0x00`, and `PROTOCOL_RESPONSE_OK` is `0x00`, so
+`ok` was unconditionally true. Consequences, all of them silent: `WriteFan*` always returned true,
+"Rejected by device" was unreachable in the UI, `/fan/*` never returned a refusal to a remote
+caller, the hold loop never faulted on a rejected duty write, and `_lastCommandedDuty` was updated
+even when the device refused the write.
+
+**Provenance matters: this was NOT introduced by the 1.5.3 work.** `b3fa5cf` (the remote API +
+Release-safe log) first read `inbuf[0]`; `b043192` inherited it and made it load-bearing, which is
+what finally exposed it. The original code never checked a status byte at all.
+
+**The payload starts at `_in[1]`, established three independent ways** — see the hardware-limits
+section above for the standing rule. Briefly: HidSharp carries the report id in byte 0 of both
+directions (hence `_out[1] = command`); liquidctl reads status at `res[0]` and data at `res[1..]`
+from a buffer with no report id, and every pCUE index is exactly one higher; and `ReadFanPower`'s
+`_in[2]` was verified against ground truth on the bench (fan left at 33%, read back 33% after a
+restart).
+
+**Deliberately defensive:** only an explicit `0x01` counts as a refusal. Any other unexpected value
+is logged loudly (`[UNEXPECTED STATUS 0x..]`) and treated as OK, so if the framing is ever not what
+is assumed the app degrades to the old behaviour instead of reporting every healthy write as
+rejected — which would be far worse than missing a rejection.
+
+**BENCH-UNTESTED** (bench powered off). The check already on the owed list now discriminates:
+commanding an RPM on a 3-pin channel should log `[DEVICE REJECTED 0x01]` where it previously always
+logged `[OK]`. That one test confirms or refutes the whole fix.
+
+### 2026-08-25 — Shipped as 1.5.3: PR #3 merged, release published, manifest updated
 The whole 2026-08-25 body of work (extraction, status byte, dithering, stats, hygiene, plus the
 six codex-review fixes) was committed as one change (`b043192`, +918/−2628), merged via
 **PR #3** into master (`87ae43e`), and published:
