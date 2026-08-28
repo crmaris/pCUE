@@ -96,6 +96,7 @@ namespace pCUE
                     string json = new JavaScriptSerializer().Serialize(new
                     {
                         app = "pCUE",
+                        protocolVersion = PcueRemoteClient.MinimumProtocolVersion,
                         version = AppUpdateService.InstalledVersion,
                         host = Environment.MachineName,
                         url = "http://" + localIp + ":" + _apiPort + "/",

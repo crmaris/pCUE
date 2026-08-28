@@ -32,5 +32,11 @@
     <Setting Name="Tacho_Adjust" Type="System.Boolean" Scope="User">
       <Value Profile="(Default)">False</Value>
     </Setting>
+    <Setting Name="Remote_Client_Host" Type="System.String" Scope="User">
+      <Value Profile="(Default)" />
+    </Setting>
+    <Setting Name="Remote_Client_Port" Type="System.Int32" Scope="User">
+      <Value Profile="(Default)">5056</Value>
+    </Setting>
   </Settings>
 </SettingsFile>

@@ -75,6 +75,9 @@ namespace pCUE
         //Series indices inside the stats bank.
         const int StatCpuTemp = 0, StatCpuClock = 1, StatCpuLoad = 2;
         const int StatFanBase = 3;   // fans 0..5 -> StatFanBase+0..+5
+        double latestCpuTemperature;
+        double latestCpuClock;
+        double latestCpuLoad;
 
         //Control arrays. Built explicitly from the named fields in the constructor - the old
         //FindLogicalChildren walk depended on XAML declaration order, so reordering the XAML
@@ -120,6 +123,34 @@ namespace pCUE
         //Optional HTTP remote-control server. Off unless enabled on the command line.
         RemoteControlServer remoteServer;
         DiscoveryBeacon discoveryBeacon;
+
+        //The same window can target local hardware or another pCUE instance. The client is pure
+        //C# inside pCUE; the PowerShell CLI remains an optional operator tool, never a dependency.
+        readonly PcueRemoteClient remoteClient;
+        PcueStatusSnapshot lastRemoteSnapshot;
+        readonly bool[] remoteSetpointDirty = new bool[6];
+        bool remoteSnapshotApplying;
+        string localWindowTitle = "pCUE - Cybenetics LTD";
+        readonly int[] savedLocalModes = new int[6];
+        readonly uint[] savedLocalSetpoints = new uint[6];
+        bool savedLocalSync;
+        bool savedLocalAverage;
+        bool savedLocalAutoStart;
+        bool savedLocalAutoConnect;
+        bool savedLocalTachoAdjust;
+        bool savedLocalCommanderConnected;
+        bool savedLocalCpuMonitoring;
+        bool savedLocalTachConnected;
+        bool savedLocalRemoteEnabled;
+        string savedLocalCommanderFirmware;
+        string savedLocalHoldDisplay;
+        int savedLocalTachAssignment;
+        bool localUiStateSaved;
+
+        bool IsRemoteMode
+        {
+            get { return Target_Mode_Combo != null && Target_Mode_Combo.SelectedIndex == 1; }
+        }
 
         //In-app updater (checks a signed-manifest URL; never installs on its own).
         AppUpdateService updateService;
@@ -167,6 +198,10 @@ namespace pCUE
             //the panel and the fan column agree on what "fresh" means.
 
             updateService = new AppUpdateService();
+
+            remoteClient = new PcueRemoteClient();
+            remoteClient.SnapshotReceived += RemoteClient_SnapshotReceived;
+            remoteClient.ConnectionChanged += RemoteClient_ConnectionChanged;
         }
 
         #region Main Window Functions
@@ -180,6 +215,7 @@ namespace pCUE
                     .GetVersionInfo(System.Reflection.Assembly.GetExecutingAssembly().Location)
                     .FileVersion;
                 this.Title = "pCUE - Cybenetics LTD - v." + fileVersion;
+                localWindowTitle = this.Title;
             }
             catch (Exception ex) { Debug.WriteLine("pCUE: could not read file version: " + ex.Message); }
 
@@ -190,6 +226,11 @@ namespace pCUE
             { AVG_values.IsChecked = true; }
 
             StartRemoteControlIfRequested();
+
+            Remote_Client_Host_Box.Text = Properties.Settings.Default.Remote_Client_Host ?? "";
+            Remote_Client_Port_Box.Text = Properties.Settings.Default.Remote_Client_Port.ToString();
+            Target_Mode_Combo.SelectedIndex = 0;   //always start safe: local control is explicit
+            ApplyTargetModeUi();
 
             //Opt-in auto-connect. Deliberately NOT the default: opening the Commander also kills
             //the iCUE services, which would be a rude thing to do unasked on every launch. It earns
@@ -253,6 +294,9 @@ namespace pCUE
 
             try { discoveryBeacon?.Dispose(); }
             catch (Exception ex) { Debug.WriteLine("pCUE: discovery beacon dispose failed: " + ex.Message); }
+
+            try { remoteClient?.Dispose(); }
+            catch (Exception ex) { Debug.WriteLine("pCUE: remote client dispose failed: " + ex.Message); }
         }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
@@ -281,7 +325,7 @@ namespace pCUE
         {
             //The Min/Max/Avg figures are now maintained where each value is produced; this timer
             //only keeps the bench-tachometer readout honest about stale/lost signal.
-            Update_Tach_Panel();
+            if (!IsRemoteMode) Update_Tach_Panel();
         }
 
         //Shows the running average of each fan in its own column (ed28..ed33)
@@ -433,10 +477,13 @@ namespace pCUE
             {
                 int idx = ch * 3;                     // channel -> "Current" index in Fan_array (0,3,6,9,12,15)
                 if (idx >= Fan_array.Length) return;
-                Fan_array[idx].Text = rpms[ch].ToString();
                 stats.Add(StatFanBase + ch, rpms[ch]);
+                if (!IsRemoteMode) Fan_array[idx].Text = rpms[ch].ToString();
             }
 
+            //Keep collecting the local session while another pCUE is on screen, but never let its
+            //poller overwrite the remote readouts. Switching back reveals the accumulated values.
+            if (IsRemoteMode) return;
             Set_Fan_Average_Column();
             RenderFanMinMaxColumns();
         }
@@ -450,6 +497,8 @@ namespace pCUE
             Corsair_Commander_Connected = false;
             StopFanPolling();   //cancellation only - never waits on the poll task
             commander.Disconnect();   //nulls + closes the stream, interrupting any blocked read
+
+            if (IsRemoteMode) return; //the remote target owns the visible controls for now
 
             //reset the UI to the disconnected state
             Open_Corsair_Commander.Content = "Open";
@@ -498,8 +547,27 @@ namespace pCUE
         //to ITS caller too (the write itself happens inside the SelectionChanged event).
         readonly bool[] fanModeWriteOk = new bool[6];
 
-        private void Commander_Pro_Set_Fan_Connection_Mode(object sender, SelectionChangedEventArgs e)
+        private async void Commander_Pro_Set_Fan_Connection_Mode(object sender, SelectionChangedEventArgs e)
         {
+            if (remoteSnapshotApplying) return;
+
+            if (IsRemoteMode)
+            {
+                int remoteFan = Array.IndexOf(Fan_Mode_Controls, sender as ComboBox);
+                if (remoteFan < 0) return;
+                if (!remoteClient.IsConnected)
+                {
+                    SetRemoteClientError("Remote pCUE is not connected.");
+                    return;
+                }
+                string[] modes = { "auto", "3pin", "4pin", "disconnect" };
+                int selected = Fan_Mode_Controls[remoteFan].SelectedIndex;
+                if (selected < 0 || selected >= modes.Length) return;
+                ShowRemoteActionResult(await remoteClient.SetFanModeAsync(remoteFan + 1, modes[selected]),
+                                       "Fan " + (remoteFan + 1) + " mode accepted");
+                return;
+            }
+
             if (Corsair_Commander_Connected != true) return;
 
             String nam = ((ComboBox)sender).Name;
@@ -546,8 +614,17 @@ namespace pCUE
             return commander.WriteFanPower(fan_channel, fan_power);
         }
 
-        private void Open_Corsair_Commander_Click(object sender, RoutedEventArgs e)
+        private async void Open_Corsair_Commander_Click(object sender, RoutedEventArgs e)
         {
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                bool open = Open_Corsair_Commander.Content.ToString() == "Open";
+                ShowRemoteActionResult(await remoteClient.SetCommanderOpenAsync(open),
+                                       open ? "Remote Commander opened" : "Remote Commander closed");
+                return;
+            }
+
              if (Open_Corsair_Commander.Content.ToString() == "Open")
             {
                 try
@@ -673,6 +750,10 @@ namespace pCUE
                 double clock = coreAvgClk ?? (clockCount > 0 ? clockSum / clockCount : 0.0);
                 double load = totalLoad ?? 0.0;
 
+                latestCpuTemperature = temperature;
+                latestCpuClock = clock;
+                latestCpuLoad = load;
+
                 CPU_array[0].Text = temperature.ToString("0.0");
                 CPU_array[3].Text = clock.ToString("N1");
                 CPU_array[6].Text = load.ToString("N1");
@@ -691,8 +772,14 @@ namespace pCUE
         #endregion
 
         #region App Kill functions
-        private void Kill_iCUE_services_Click(object sender, RoutedEventArgs e)
+        private async void Kill_iCUE_services_Click(object sender, RoutedEventArgs e)
         {
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                ShowRemoteActionResult(await remoteClient.KillIcueAsync(), "Remote iCUE services stopped");
+                return;
+            }
             Kill_iCUE_Function();
         }
 
@@ -853,6 +940,14 @@ namespace pCUE
 
         private void Fan_Numeric_ValueChanged(object sender, RoutedPropertyChangedEventArgs<uint> e)
         {
+            int changed = Array.IndexOf(Fan_Numeric_Boxes, sender as NumericUpDownLib.UIntegerUpDown);
+            if (remoteSnapshotApplying)
+            {
+                if (changed >= 0) Fan_Slider[changed].Value = Fan_Numeric_Boxes[changed].Value;
+                return;
+            }
+            if (IsRemoteMode && changed >= 0) remoteSetpointDirty[changed] = true;
+
             if (Sync_Fans_CheckBox.IsChecked == true)
             {
                 Fan1_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
@@ -875,6 +970,14 @@ namespace pCUE
 
         private void Fan_Slider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
+            int changed = Array.IndexOf(Fan_Slider, sender as Slider);
+            if (remoteSnapshotApplying)
+            {
+                if (changed >= 0) Fan_Numeric_Boxes[changed].Value = Convert.ToUInt32(Fan_Slider[changed].Value);
+                return;
+            }
+            if (IsRemoteMode && changed >= 0) remoteSetpointDirty[changed] = true;
+
             if (Sync_Fans_CheckBox.IsChecked == true)
             {
                 Fan1_Numeric.Value = Convert.ToUInt32(Fan1_Slider.Value);
@@ -896,8 +999,18 @@ namespace pCUE
         }
 
         //for the Average Values CheckBox
-        private void Average_Values(object sender, RoutedEventArgs e)
+        private async void Average_Values(object sender, RoutedEventArgs e)
         {
+            if (remoteSnapshotApplying) return;
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                bool remoteAverage = AVG_values.IsChecked == true;
+                CPU_box.Header = remoteAverage ? "CPU Current/AVG/Max" : "CPU Current/Min/Max";
+                ShowRemoteActionResult(await remoteClient.SetAverageValuesAsync(remoteAverage));
+                return;
+            }
+
             if (AVG_values.IsChecked == true)
             {
                 CPU_box.Header = "CPU Current/AVG/Max";
@@ -913,8 +1026,14 @@ namespace pCUE
             RenderCpuMinMaxColumns();   //swap the middle column immediately, not on the next sample
         }
 
-        private void Reset_Button_Click(object sender, RoutedEventArgs e)
+        private async void Reset_Button_Click(object sender, RoutedEventArgs e)
         {
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                ShowRemoteActionResult(await remoteClient.ResetStatsAsync(), "Remote statistics reset");
+                return;
+            }
             Reset_function();
         }
 
@@ -937,8 +1056,19 @@ namespace pCUE
             Set_Fan_Average_Column();   //the Avg column is not part of Fan_array - clear it too
         }
 
-        private void Set_Fan_Speed_Click(object sender, RoutedEventArgs e)
+        private async void Set_Fan_Speed_Click(object sender, RoutedEventArgs e)
         {
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                int[] setpoints = Fan_Numeric_Boxes.Select(box => (int)box.Value).ToArray();
+                PcueApiActionResponse response = await remoteClient.ApplyFanSetpointsAsync(setpoints);
+                if (response != null && response.ok)
+                    Array.Clear(remoteSetpointDirty, 0, remoteSetpointDirty.Length);
+                ShowRemoteActionResult(response, "Remote fan setpoints accepted");
+                return;
+            }
+
             //Checked here, not per-fan: the wrappers' false means "the DEVICE refused", and a
             //pre-connect click would otherwise report all six fans as rejected.
             if (!Corsair_Commander_Connected)
@@ -1022,11 +1152,11 @@ namespace pCUE
             return true;
         }
 
-        public object GetStatus()
+        public PcueStatusSnapshot GetStatus()
         {
-            return Dispatcher.Invoke(new Func<object>(delegate
+            return Dispatcher.Invoke(new Func<PcueStatusSnapshot>(delegate
             {
-                var fans = new List<object>();
+                var fans = new List<PcueFanStatus>();
                 for (int ch = 0; ch < 6; ch++)
                 {
                     int rpm;
@@ -1044,12 +1174,15 @@ namespace pCUE
                         }
                     }
 
-                    fans.Add(new
+                    fans.Add(new PcueFanStatus
                     {
                         fan = ch + 1,
-                        rpm,
-                        mode,
+                        rpm = rpm,
+                        mode = mode,
                         setpoint = ch < Fan_Numeric_Boxes.Length ? (int)Fan_Numeric_Boxes[ch].Value : 0,
+                        min = stats.Min(StatFanBase + ch),
+                        max = stats.Max(StatFanBase + ch),
+                        average = stats.Average(StatFanBase + ch),
                     });
                 }
 
@@ -1074,39 +1207,70 @@ namespace pCUE
                     dutySource = tracked >= 0 ? "tracked" : "unknown";
                 }
 
-                return new
+                return new PcueStatusSnapshot
                 {
                     app = "pCUE",
+                    protocolVersion = PcueRemoteClient.MinimumProtocolVersion,
                     version = AppUpdateService.InstalledVersion,
-                    commander = new
+                    machine = Environment.MachineName,
+                    updatedUtc = DateTime.UtcNow.ToString("o"),
+                    commander = new PcueCommanderStatus
                     {
                         connected = Corsair_Commander_Connected,
                         firmware = Commander_SN.Text,
                     },
-                    cpu = new
+                    cpu = new PcueCpuStatus
                     {
                         temperature = CPU_array.Length > 0 ? CPU_array[0].Text : null,
                         mhz = CPU_array.Length > 3 ? CPU_array[3].Text : null,
                         load = CPU_array.Length > 6 ? CPU_array[6].Text : null,
                         monitoring = CpuDataTimer.Enabled,
+                        temperatureStats = new PcueMetricStatus
+                        {
+                            current = latestCpuTemperature,
+                            min = stats.Min(StatCpuTemp),
+                            max = stats.Max(StatCpuTemp),
+                            average = stats.Average(StatCpuTemp),
+                        },
+                        mhzStats = new PcueMetricStatus
+                        {
+                            current = latestCpuClock,
+                            min = stats.Min(StatCpuClock),
+                            max = stats.Max(StatCpuClock),
+                            average = stats.Average(StatCpuClock),
+                        },
+                        loadStats = new PcueMetricStatus
+                        {
+                            current = latestCpuLoad,
+                            min = stats.Min(StatCpuLoad),
+                            max = stats.Max(StatCpuLoad),
+                            average = stats.Average(StatCpuLoad),
+                        },
                     },
-                    fans,
-                    tachometer = new
+                    fans = fans,
+                    tachometer = new PcueTachometerStatus
                     {
                         connected = bench_tach != null && bench_tach.IsConnected,
                         rpm = tachRpm,                      // null = stale or no signal
                         batteryLow = bench_tach != null && bench_tach.BatteryLow,
                         assignedFan = tachAssignedChannel >= 0 ? (int?)(tachAssignedChannel + 1) : null,
                     },
-                    hold = new
+                    hold = new PcueHoldStatus
                     {
                         running = rpmHold != null && rpmHold.IsRunning,
                         status = rpmHold != null ? rpmHold.Status.ToString() : FanHoldStatus.Idle.ToString(),
+                        display = Hold_Status_Label.Text,
                         fan = holdChannel >= 0 ? (int?)(holdChannel + 1) : null,
                         duty = holdDuty,                    // null when this session never set one
-                        dutySource,
+                        dutySource = dutySource,
                         target = (int)holdConfig.TargetRpm,
                         tachoAdjust = Tacho_Adjust_CheckBox.IsChecked == true,
+                    },
+                    settings = new PcueUiSettingsStatus
+                    {
+                        averageValues = AVG_values.IsChecked == true,
+                        autoStart = autostartCheckBox.IsChecked == true,
+                        autoConnect = Auto_Connect_CheckBox.IsChecked == true,
                     },
                 };
             }));
@@ -1158,6 +1322,38 @@ namespace pCUE
             if (!fanModeWriteOk[channel])
                 return "device rejected the mode change for fan " + fan + ".";
             return null;
+        }
+
+        public string ApplyFanSetpoints(int[] values)
+        {
+            if (values == null || values.Length != 6) return "values must contain exactly six setpoints.";
+            for (int i = 0; i < values.Length; i++)
+                if (values[i] < 0 || values[i] > 3500)
+                    return "fan " + (i + 1) + " setpoint must be 0-3500.";
+            if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
+
+            string result = null;
+            Dispatcher.Invoke(new Action(delegate
+            {
+                //Populate the six boxes without the local Sync checkbox rewriting each assignment
+                //from Fan #1. Restore Sync immediately; it remains a view/edit convenience.
+                bool sync = Sync_Fans_CheckBox.IsChecked == true;
+                Sync_Fans_CheckBox.IsChecked = false;
+                try
+                {
+                    for (int i = 0; i < 6; i++) Fan_Numeric_Boxes[i].Value = (uint)values[i];
+                }
+                finally { Sync_Fans_CheckBox.IsChecked = sync; }
+
+                StopRpmHold("remote batch setpoints");
+                var rejected = new List<string>();
+                for (int i = 0; i < 6; i++)
+                    if (!Set_Fan_Speed_Function_Commander_Pro(i)) rejected.Add("fan " + (i + 1));
+                if (rejected.Count > 0)
+                    result = "device rejected " + string.Join(", ", rejected) +
+                             " (fixed RPM needs a 4-pin/PWM channel).";
+            }));
+            return result;
         }
 
         public string StartHold(int fan, int rpm)
@@ -1365,6 +1561,406 @@ namespace pCUE
             return null;
         }
 
+        public string SetAverageValues(bool on)
+        {
+            Dispatcher.Invoke(new Action(delegate { AVG_values.IsChecked = on; }));
+            return null;
+        }
+
+        public string SetAutoStart(bool on)
+        {
+            Dispatcher.Invoke(new Action(delegate { autostartCheckBox.IsChecked = on; }));
+            return null;
+        }
+
+        public string SetAutoConnect(bool on)
+        {
+            Dispatcher.Invoke(new Action(delegate { Auto_Connect_CheckBox.IsChecked = on; }));
+            return null;
+        }
+
+        public string SetTachoAdjust(bool on)
+        {
+            Dispatcher.Invoke(new Action(delegate { Tacho_Adjust_CheckBox.IsChecked = on; }));
+            return null;
+        }
+
+        public string KillIcue()
+        {
+            Dispatcher.Invoke(new Action(delegate { Kill_iCUE_Function(); }));
+            return null;
+        }
+
+        #region In-app remote pCUE client
+        private void Target_Mode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (Remote_Client_Host_Box == null || remoteClient == null) return; //XAML still loading
+            ApplyTargetModeUi();
+        }
+
+        private void SaveLocalUiState()
+        {
+            for (int i = 0; i < 6; i++)
+            {
+                savedLocalModes[i] = Fan_Mode_Controls[i].SelectedIndex;
+                savedLocalSetpoints[i] = Fan_Numeric_Boxes[i].Value;
+            }
+            savedLocalSync = Sync_Fans_CheckBox.IsChecked == true;
+            savedLocalAverage = AVG_values.IsChecked == true;
+            savedLocalAutoStart = autostartCheckBox.IsChecked == true;
+            savedLocalAutoConnect = Auto_Connect_CheckBox.IsChecked == true;
+            savedLocalTachoAdjust = Tacho_Adjust_CheckBox.IsChecked == true;
+            savedLocalCommanderConnected = Corsair_Commander_Connected;
+            savedLocalCpuMonitoring = CpuDataTimer.Enabled;
+            savedLocalTachConnected = bench_tach != null && bench_tach.IsConnected;
+            savedLocalRemoteEnabled = Remote_Enable_CheckBox.IsChecked == true;
+            savedLocalCommanderFirmware = Commander_SN.Text;
+            savedLocalHoldDisplay = Hold_Status_Label.Text;
+            savedLocalTachAssignment = Tach_Fan_Assign.SelectedIndex;
+            localUiStateSaved = true;
+        }
+
+        private void RestoreLocalUiState()
+        {
+            remoteSnapshotApplying = true;
+            try
+            {
+                if (localUiStateSaved)
+                {
+                    Sync_Fans_CheckBox.IsChecked = false;
+                    for (int i = 0; i < 6; i++)
+                    {
+                        Fan_Mode_Controls[i].SelectedIndex = savedLocalModes[i];
+                        Fan_Numeric_Boxes[i].Value = savedLocalSetpoints[i];
+                    }
+                    Sync_Fans_CheckBox.IsChecked = savedLocalSync;
+                    AVG_values.IsChecked = savedLocalAverage;
+                    autostartCheckBox.IsChecked = savedLocalAutoStart;
+                    Auto_Connect_CheckBox.IsChecked = savedLocalAutoConnect;
+                    Tacho_Adjust_CheckBox.IsChecked = savedLocalTachoAdjust;
+                    Tach_Fan_Assign.SelectedIndex = savedLocalTachAssignment;
+                }
+
+                for (int ch = 0; ch < 6; ch++)
+                {
+                    int current;
+                    lock (fanRpmLock) current = latestFanRpm[ch];
+                    Fan_array[ch * 3].Text = current.ToString();
+                    Fan_array[ch * 3 + 1].Text = FormatStat(StatFanBase + ch, stats.Min(StatFanBase + ch));
+                    Fan_array[ch * 3 + 2].Text = FormatStat(StatFanBase + ch, stats.Max(StatFanBase + ch));
+                }
+                Set_Fan_Average_Column();
+                CPU_array[0].Text = latestCpuTemperature.ToString("0.0");
+                CPU_array[3].Text = latestCpuClock.ToString("N1");
+                CPU_array[6].Text = latestCpuLoad.ToString("N1");
+                RenderCpuMinMaxColumns();
+                Commander_SN.Text = savedLocalCommanderFirmware ?? "";
+                Open_Corsair_Commander.Content = Corsair_Commander_Connected ? "Close" : "Open";
+                SetStatus(Corsair_Commander_Connected ? "● Connected" : "● Disconnected",
+                          Corsair_Commander_Connected ? System.Windows.Media.Brushes.Lime
+                                                     : System.Windows.Media.Brushes.Gainsboro);
+                bool localTachConnected = bench_tach != null && bench_tach.IsConnected;
+                Tach_Connect_Button.Content = localTachConnected ? "Disconnect" : "Connect Tach";
+                Tach_Status_Label.Text = localTachConnected ? "● Connected" : "● Disconnected";
+                Tach_Status_Label.Foreground = localTachConnected
+                    ? System.Windows.Media.Brushes.Lime : System.Windows.Media.Brushes.Gainsboro;
+                Tach_RPM_Readout.Text = "----";
+                Tach_Battery_Label.Visibility = Visibility.Collapsed;
+                Hold_Status_Label.Text = savedLocalHoldDisplay ?? "";
+
+                if (localUiStateSaved)
+                {
+                    if (savedLocalCpuMonitoring)
+                    {
+                        CpuDataTimer.Start();
+                        Start_CPU_data.Content = "Stop";
+                    }
+                    if (savedLocalCommanderConnected && !Corsair_Commander_Connected)
+                        Open_Corsair_Commander_Click(this, null);
+                    if (savedLocalTachConnected && bench_tach != null && !bench_tach.IsConnected)
+                    {
+                        try { bench_tach.Connect(); }
+                        catch (Exception ex) { AppLog.Warn("Could not restore the local tachometer: " + ex.Message); }
+                    }
+                }
+            }
+            finally { remoteSnapshotApplying = false; }
+        }
+
+        private void ApplyTargetModeUi()
+        {
+            bool remote = IsRemoteMode;
+            Remote_Client_Host_Box.IsEnabled = remote;
+            Remote_Client_Port_Box.IsEnabled = remote;
+            Remote_Client_Token_Box.IsEnabled = remote;
+            Remote_Client_Connect_Button.IsEnabled = remote;
+            Remote_Client_Discover_Button.IsEnabled = remote;
+
+            //A client-mode pCUE never proxies its selected target to a third instance. This keeps
+            //the server contract unambiguously local and prevents accidental control chains.
+            Remote_Enable_CheckBox.IsEnabled = !remote;
+            Remote_Port_Box.IsEnabled = !remote;
+            Remote_Token_Box.IsEnabled = !remote;
+
+            if (remote)
+            {
+                SaveLocalUiState();
+                if (Remote_Enable_CheckBox.IsChecked == true) Remote_Enable_CheckBox.IsChecked = false;
+                ApplyRemoteControlState();
+                CpuDataTimer.Stop();
+                Start_CPU_data.Content = "Start";
+                SetRemoteActionControlsEnabled(false);
+                Remote_Client_Status_Label.Text = "● Enter a remote pCUE host and connect";
+                Remote_Client_Status_Label.Foreground = UpdateAlertBrush;
+            }
+            else
+            {
+                remoteClient.Disconnect();
+                lastRemoteSnapshot = null;
+                Array.Clear(remoteSetpointDirty, 0, remoteSetpointDirty.Length);
+                this.Title = localWindowTitle;
+                Remote_Client_Connect_Button.Content = "Connect";
+                Remote_Client_Status_Label.Text = "● This PC";
+                Remote_Client_Status_Label.Foreground = UpdateInfoBrush;
+                SetRemoteActionControlsEnabled(true);
+                RestoreLocalUiState();
+                if (localUiStateSaved) Remote_Enable_CheckBox.IsChecked = savedLocalRemoteEnabled;
+            }
+        }
+
+        private void SetRemoteActionControlsEnabled(bool enabled)
+        {
+            Set_Fan_Speed.IsEnabled = enabled;
+            Open_Corsair_Commander.IsEnabled = enabled;
+            Start_CPU_data.IsEnabled = enabled;
+            Tach_Connect_Button.IsEnabled = enabled;
+            Tach_Fan_Assign.IsEnabled = enabled;
+            Reset_Button.IsEnabled = enabled;
+            Kill_iCUE_services.IsEnabled = enabled;
+            AVG_values.IsEnabled = enabled;
+            autostartCheckBox.IsEnabled = enabled;
+            Auto_Connect_CheckBox.IsEnabled = enabled;
+            Tacho_Adjust_CheckBox.IsEnabled = enabled;
+            foreach (ComboBox mode in Fan_Mode_Controls) mode.IsEnabled = enabled;
+        }
+
+        private async void Remote_Client_Connect_Click(object sender, RoutedEventArgs e)
+        {
+            if (!IsRemoteMode) return;
+            if (remoteClient.IsConnected)
+            {
+                remoteClient.Disconnect();
+                Remote_Client_Connect_Button.Content = "Connect";
+                Remote_Client_Status_Label.Text = "● Disconnected";
+                Remote_Client_Status_Label.Foreground = UpdateAlertBrush;
+                SetRemoteActionControlsEnabled(false);
+                return;
+            }
+
+            if (!int.TryParse(Remote_Client_Port_Box.Text.Trim(), out int port) || port < 1 || port > 65535)
+            {
+                SetRemoteClientError("Port must be 1-65535.");
+                return;
+            }
+
+            Remote_Client_Connect_Button.IsEnabled = false;
+            Remote_Client_Status_Label.Text = "● Connecting...";
+            Remote_Client_Status_Label.Foreground = UpdateInfoBrush;
+            try
+            {
+                SaveRemoteClientSettings();
+                await remoteClient.ConnectAsync(Remote_Client_Host_Box.Text,
+                                                port, Remote_Client_Token_Box.Password);
+                if (!IsRemoteMode) { remoteClient.Disconnect(); return; }
+                Remote_Client_Connect_Button.Content = "Disconnect";
+            }
+            catch (Exception ex) { SetRemoteClientError(ex.Message); }
+            finally { Remote_Client_Connect_Button.IsEnabled = IsRemoteMode; }
+        }
+
+        private async void Remote_Client_Discover_Click(object sender, RoutedEventArgs e)
+        {
+            if (!IsRemoteMode) return;
+            Remote_Client_Discover_Button.IsEnabled = false;
+            Remote_Client_Status_Label.Text = "● Looking for pCUE on the LAN...";
+            Remote_Client_Status_Label.Foreground = UpdateInfoBrush;
+            try
+            {
+                PcueDiscoveryResult found = await remoteClient.DiscoverAsync();
+                if (!IsRemoteMode) return;
+                if (found == null) { SetRemoteClientError("No pCUE instance answered discovery."); return; }
+                var uri = new Uri(found.url);
+                Remote_Client_Host_Box.Text = uri.Host;
+                Remote_Client_Port_Box.Text = uri.Port.ToString();
+                SaveRemoteClientSettings();
+                Remote_Client_Status_Label.Text = "● Found " + found.host + " (pCUE " + found.version + ")";
+                Remote_Client_Status_Label.Foreground = System.Windows.Media.Brushes.Lime;
+            }
+            catch (Exception ex) { SetRemoteClientError("Discovery failed: " + ex.Message); }
+            finally { Remote_Client_Discover_Button.IsEnabled = IsRemoteMode; }
+        }
+
+        private void Remote_Client_Settings_Changed(object sender, RoutedEventArgs e)
+        {
+            if (Remote_Client_Host_Box == null) return;
+            SaveRemoteClientSettings();
+        }
+
+        private void SaveRemoteClientSettings()
+        {
+            Properties.Settings.Default.Remote_Client_Host = Remote_Client_Host_Box.Text.Trim();
+            if (int.TryParse(Remote_Client_Port_Box.Text.Trim(), out int port) && port > 0 && port < 65536)
+                Properties.Settings.Default.Remote_Client_Port = port;
+            Properties.Settings.Default.Save();
+            //The client token is deliberately not persisted.
+        }
+
+        private void RemoteClient_SnapshotReceived(object sender, PcueStatusSnapshot snapshot)
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (IsRemoteMode) ApplyRemoteSnapshot(snapshot);
+                }));
+            }
+            catch (Exception ex) { AppLog.Warn("Remote snapshot dispatch failed: " + ex.Message); }
+        }
+
+        private void RemoteClient_ConnectionChanged(object sender, PcueRemoteConnectionEventArgs e)
+        {
+            try
+            {
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    if (!IsRemoteMode) return;
+                    Remote_Client_Status_Label.Text = "● " + e.Message;
+                    Remote_Client_Status_Label.Foreground = e.Connected
+                        ? System.Windows.Media.Brushes.Lime : UpdateAlertBrush;
+                    Remote_Client_Connect_Button.Content = e.Connected ? "Disconnect" : "Connect";
+                    SetRemoteActionControlsEnabled(e.Connected);
+                }));
+            }
+            catch (Exception ex) { AppLog.Warn("Remote connection dispatch failed: " + ex.Message); }
+        }
+
+        private void ApplyRemoteSnapshot(PcueStatusSnapshot snapshot)
+        {
+            if (snapshot == null || snapshot.commander == null || snapshot.cpu == null ||
+                snapshot.tachometer == null || snapshot.hold == null || snapshot.settings == null) return;
+
+            lastRemoteSnapshot = snapshot;
+            remoteSnapshotApplying = true;
+            try
+            {
+                this.Title = localWindowTitle + " — Remote: " + (snapshot.machine ?? remoteClient.Endpoint);
+                Remote_Client_Status_Label.Text = "● Connected to " + (snapshot.machine ?? remoteClient.Endpoint) +
+                                                  " — pCUE " + snapshot.version;
+                Remote_Client_Status_Label.Foreground = System.Windows.Media.Brushes.Lime;
+                SetRemoteActionControlsEnabled(true);
+
+                Commander_SN.Text = snapshot.commander.firmware ?? "";
+                Open_Corsair_Commander.Content = snapshot.commander.connected ? "Close" : "Open";
+                SetStatus(snapshot.commander.connected ? "● Connected" : "● Disconnected",
+                          snapshot.commander.connected ? System.Windows.Media.Brushes.Lime
+                                                       : System.Windows.Media.Brushes.Gainsboro);
+
+                AVG_values.IsChecked = snapshot.settings.averageValues;
+                CPU_box.Header = snapshot.settings.averageValues ? "CPU Current/AVG/Max" : "CPU Current/Min/Max";
+                autostartCheckBox.IsChecked = snapshot.settings.autoStart;
+                Auto_Connect_CheckBox.IsChecked = snapshot.settings.autoConnect;
+                Tacho_Adjust_CheckBox.IsChecked = snapshot.hold.tachoAdjust;
+                Start_CPU_data.Content = snapshot.cpu.monitoring ? "Stop" : "Start";
+                ApplyRemoteCpuMetric(snapshot.cpu.temperatureStats, 0, StatCpuTemp, snapshot.settings.averageValues);
+                ApplyRemoteCpuMetric(snapshot.cpu.mhzStats, 3, StatCpuClock, snapshot.settings.averageValues);
+                ApplyRemoteCpuMetric(snapshot.cpu.loadStats, 6, StatCpuLoad, snapshot.settings.averageValues);
+
+                foreach (PcueFanStatus fan in snapshot.fans)
+                {
+                    int ch = fan.fan - 1;
+                    if (ch < 0 || ch >= 6) continue;
+                    Fan_array[ch * 3].Text = fan.rpm.ToString();
+                    Fan_array[ch * 3 + 1].Text = Math.Round(fan.min).ToString();
+                    Fan_array[ch * 3 + 2].Text = Math.Round(fan.max).ToString();
+                    TextBox[] avg = { ed28, ed29, ed30, ed31, ed32, ed33 };
+                    avg[ch].Text = Math.Round(fan.average).ToString();
+                    Fan_Mode_Controls[ch].SelectedIndex = ModeIndex(fan.mode);
+                    if (!remoteSetpointDirty[ch]) Fan_Numeric_Boxes[ch].Value = (uint)Math.Max(0, fan.setpoint);
+                }
+
+                Tach_Connect_Button.Content = snapshot.tachometer.connected ? "Disconnect" : "Connect Tach";
+                Tach_Status_Label.Text = snapshot.tachometer.connected ? "● Connected" : "● Disconnected";
+                Tach_Status_Label.Foreground = snapshot.tachometer.connected
+                    ? System.Windows.Media.Brushes.Lime : System.Windows.Media.Brushes.Gainsboro;
+                Tach_RPM_Readout.Text = !snapshot.tachometer.connected ? "----"
+                    : snapshot.tachometer.rpm.HasValue ? Math.Round(snapshot.tachometer.rpm.Value).ToString()
+                    : "no signal";
+                Tach_RPM_Readout.Foreground = snapshot.tachometer.connected && !snapshot.tachometer.rpm.HasValue
+                    ? UpdateAlertBrush : UpdateInfoBrush;
+                Tach_Battery_Label.Visibility = snapshot.tachometer.batteryLow
+                    ? Visibility.Visible : Visibility.Collapsed;
+                Tach_Fan_Assign.SelectedIndex = snapshot.tachometer.assignedFan ?? 0;
+
+                Hold_Status_Label.Text = !string.IsNullOrWhiteSpace(snapshot.hold.display)
+                    ? snapshot.hold.display
+                    : snapshot.hold.status + (snapshot.hold.running
+                        ? "  target " + snapshot.hold.target + " RPM" +
+                          (snapshot.hold.duty.HasValue ? " @ " + snapshot.hold.duty.Value + "%" : "")
+                        : "");
+                Hold_Status_Label.Foreground = string.Equals(snapshot.hold.status, "Fault", StringComparison.OrdinalIgnoreCase)
+                    ? UpdateAlertBrush
+                    : string.Equals(snapshot.hold.status, "Stable", StringComparison.OrdinalIgnoreCase)
+                        ? System.Windows.Media.Brushes.Lime : UpdateInfoBrush;
+            }
+            finally { remoteSnapshotApplying = false; }
+        }
+
+        private void ApplyRemoteCpuMetric(PcueMetricStatus metric, int currentIndex, int series, bool average)
+        {
+            if (metric == null) return;
+            CPU_array[currentIndex].Text = FormatStat(series, metric.current);
+            CPU_array[currentIndex + 1].Text = average
+                ? metric.average.ToString("0.#") : FormatStat(series, metric.min);
+            CPU_array[currentIndex + 2].Text = FormatStat(series, metric.max);
+        }
+
+        private static int ModeIndex(string mode)
+        {
+            switch ((mode ?? "").Trim().ToLowerInvariant())
+            {
+                case "3pin": return 1;
+                case "4pin": return 2;
+                case "disconnect": return 3;
+                default: return 0;
+            }
+        }
+
+        private void SetRemoteClientError(string text)
+        {
+            if (!IsRemoteMode) return;
+            Remote_Client_Status_Label.Text = "● " + text;
+            Remote_Client_Status_Label.Foreground = UpdateAlertBrush;
+            SetRemoteActionControlsEnabled(false);
+        }
+
+        private void ShowRemoteActionResult(PcueApiActionResponse result, string successText = null)
+        {
+            if (!IsRemoteMode) return;
+            if (result == null || !result.ok)
+            {
+                Remote_Client_Status_Label.Text = "● " + (result?.error ?? "Remote pCUE did not return a result.");
+                Remote_Client_Status_Label.Foreground = UpdateAlertBrush;
+                SetRemoteActionControlsEnabled(remoteClient.IsConnected);
+                return;
+            }
+            if (!string.IsNullOrWhiteSpace(successText))
+            {
+                Remote_Client_Status_Label.Text = "● " + successText;
+                Remote_Client_Status_Label.Foreground = System.Windows.Media.Brushes.Lime;
+            }
+        }
+        #endregion
+
         //Command-line driven so nothing is persistently exposed and no token is ever written to disk:
         //   pCUE.exe --remote
         //   pCUE.exe --remote --remote-prefix=http://+:5056/ --remote-token=SECRET
@@ -1474,6 +2070,15 @@ namespace pCUE
         {
             if (Remote_Port_Box == null || Remote_Token_Box == null) return;   //still loading XAML
 
+            //The HTTP server always exposes this pCUE instance's local hardware. Client mode turns
+            //it off in ApplyTargetModeUi, and must not allow a late LostFocus event to restart it.
+            if (IsRemoteMode)
+            {
+                Remote_Enable_CheckBox.IsChecked = false;
+                ApplyRemoteControlState();
+                return;
+            }
+
             Properties.Settings.Default.Remote_Enabled = Remote_Enable_CheckBox.IsChecked == true;
             if (int.TryParse(Remote_Port_Box.Text.Trim(), out int port) && port > 0 && port < 65536)
                 Properties.Settings.Default.Remote_Port = port;
@@ -1496,8 +2101,16 @@ namespace pCUE
             }
         }
 
-        private void Auto_Connect_Changed(object sender, RoutedEventArgs e)
+        private async void Auto_Connect_Changed(object sender, RoutedEventArgs e)
         {
+            if (remoteSnapshotApplying) return;
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                ShowRemoteActionResult(await remoteClient.SetAutoConnectAsync(Auto_Connect_CheckBox.IsChecked == true));
+                return;
+            }
+
             Properties.Settings.Default.Auto_Connect = Auto_Connect_CheckBox.IsChecked == true;
             Properties.Settings.Default.Save();
         }
@@ -1671,8 +2284,16 @@ namespace pCUE
 
         //Unticking hands the fan back to plain duty control; the fan keeps its current duty until
         //the next Set Speed, rather than jumping.
-        private void Tacho_Adjust_Changed(object sender, RoutedEventArgs e)
+        private async void Tacho_Adjust_Changed(object sender, RoutedEventArgs e)
         {
+            if (remoteSnapshotApplying) return;
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                ShowRemoteActionResult(await remoteClient.SetTachoAdjustAsync(Tacho_Adjust_CheckBox.IsChecked == true));
+                return;
+            }
+
             Properties.Settings.Default.Tacho_Adjust = Tacho_Adjust_CheckBox.IsChecked == true;
             Properties.Settings.Default.Save();
 
@@ -1689,6 +2310,7 @@ namespace pCUE
             {
                 Dispatcher.BeginInvoke(new Action(delegate
                 {
+                    if (IsRemoteMode) return;
                     string text = s.Status + "  " + Math.Round(s.FilteredRpm) + " RPM @ " + s.Duty + "%";
                     if (!string.IsNullOrEmpty(s.Note)) text += "  (" + s.Note + ")";
                     SetHoldStatus(text, s.Status == FanHoldStatus.Fault ? UpdateAlertBrush
@@ -1845,8 +2467,17 @@ namespace pCUE
 
         #region Bench Tachometer (external USB-HID)
         //Connect / disconnect the external bench tachometer.
-        private void Tach_Connect_Button_Click(object sender, RoutedEventArgs e)
+        private async void Tach_Connect_Button_Click(object sender, RoutedEventArgs e)
         {
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                bool connected = lastRemoteSnapshot?.tachometer?.connected == true;
+                ShowRemoteActionResult(await remoteClient.SetTachConnectedAsync(!connected),
+                                       connected ? "Remote tachometer disconnected" : "Remote tachometer connected");
+                return;
+            }
+
             if (bench_tach == null) return;
             try
             {
@@ -1864,10 +2495,17 @@ namespace pCUE
 
         //Choose which fan the tachometer feeds. Index 0 = None; 1..6 = Fan #1..#6.
         //Read from the sender so an early SelectionChanged (during XAML init) can't NRE on the field.
-        private void Tach_Fan_Assign_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private async void Tach_Fan_Assign_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             int sel = ((ComboBox)sender).SelectedIndex;
             tachAssignedChannel = (sel >= 1 && sel <= 6) ? (sel - 1) : -1;
+
+            if (remoteSnapshotApplying) return;
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                ShowRemoteActionResult(await remoteClient.SetTachAssignmentAsync(sel));
+            }
         }
 
         //Refresh the tach panel from the SAME freshness rule the fan column uses (ReadRpm() returns
@@ -1939,6 +2577,7 @@ namespace pCUE
             {
                 Dispatcher.BeginInvoke(new Action(delegate
                 {
+                    if (IsRemoteMode) return;
                     Tach_Connect_Button.Content = connected ? "Disconnect" : "Connect Tach";
                     //Same wording and colours as the Commander PRO status line above.
                     Tach_Status_Label.Text = connected ? "● Connected" : "● Disconnected";
@@ -1973,8 +2612,16 @@ namespace pCUE
             key.Close();
         }
 
-        private void Autostart(object sender, RoutedEventArgs e)
+        private async void Autostart(object sender, RoutedEventArgs e)
         {
+            if (remoteSnapshotApplying) return;
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                ShowRemoteActionResult(await remoteClient.SetAutoStartAsync(autostartCheckBox.IsChecked == true));
+                return;
+            }
+
             if (autostartCheckBox.IsChecked == true)
             {
                 this.Startup(true);
@@ -1989,8 +2636,17 @@ namespace pCUE
             }
         }
 
-        private void Start_CPU_data_Click(object sender, RoutedEventArgs e)
+        private async void Start_CPU_data_Click(object sender, RoutedEventArgs e)
         {
+            if (IsRemoteMode)
+            {
+                if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
+                bool monitoring = lastRemoteSnapshot?.cpu?.monitoring == true;
+                ShowRemoteActionResult(await remoteClient.SetCpuMonitoringAsync(!monitoring),
+                                       monitoring ? "Remote CPU monitoring stopped" : "Remote CPU monitoring started");
+                return;
+            }
+
             if (Start_CPU_data.Content.ToString() == "Start")
             {
                 try

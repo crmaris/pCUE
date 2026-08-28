@@ -8,7 +8,7 @@ to drive and a fraction of the size.
 - Live CPU temperature, clock and load (via LibreHardwareMonitor)
 - Min / Max / Average per fan and for the CPU
 - Closed-loop **RPM hold** using an external bench tachometer
-- In-app updates, and an optional HTTP remote-control API
+- In-app updates, an optional HTTP remote-control API, and full in-app control of another pCUE PC
 
 Requires Windows and .NET Framework 4.8 (shipped with Windows 10 1903+ and Windows 11). pCUE runs
 elevated, because reading CPU sensors needs it.
@@ -44,7 +44,20 @@ which is enough to adapt the decoder.
 
 ## Remote control (optional)
 
-Tick **Remote** to expose an HTTP API for scripting or unattended benches.
+Use the new **Target** strip to work on another PC without leaving pCUE:
+
+1. On the bench PC, tick **Allow remote**, choose a token, and leave pCUE running.
+2. On your control PC, choose **Remote pCUE**, enter the bench name/IP and the same token, then
+   press **Connect**. **Find** can locate a pCUE instance on the LAN.
+3. The normal pCUE interface now shows the remote CPU, fans, tachometer and hold state. Its existing
+   buttons, fan modes, sliders and settings operate the remote PC. Switch Target back to **This PC**
+   to restore the local state.
+
+The connection uses a live status stream and reconnects automatically after a brief network loss.
+The client remembers the host and port, but deliberately keeps its token in memory only.
+
+Tick **Allow remote** to expose the local pCUE API for another pCUE, scripting, or an unattended
+bench.
 
 - With the **Token** box empty, pCUE listens on `127.0.0.1` only.
 - Entering a token is what allows access from other machines, and every such request must present
@@ -77,9 +90,9 @@ $env:PCUE_SERVER = '192.168.1.20'
 $env:PCUE_TOKEN  = 'the-token-you-typed-in-the-app'
 ```
 
-The token is read from the environment and **never written to disk**, matching the app, which does
-not persist it either. With no `-Server` and no `PCUE_SERVER`, the CLI tries localhost and then
-asks the LAN who is listening — `pcue discover` on its own lists what it finds.
+The CLI token is read from the environment and **never written to disk**, matching the in-app
+remote client. With no `-Server` and no `PCUE_SERVER`, the CLI tries localhost and then asks the
+LAN who is listening — `pcue discover` on its own lists what it finds.
 
 Add `-Json` to any command for raw output. Exit codes are meaningful, so a bench script can tell
 the cases apart: `0` success, `1` pCUE refused the request, `2` no pCUE reachable, `3` bad usage.
@@ -88,7 +101,7 @@ the cases apart: `0` success, `1` pCUE refused the request, `2` no pCUE reachabl
 
 ```powershell
 MSBuild pCUE\pCUE.csproj /p:Configuration=Debug
-pwsh scripts\Invoke-LocalCI.ps1     # build + UI layout check + packaging
+pwsh scripts\Invoke-LocalCI.ps1     # build + remote integration + UI layout + packaging
 pwsh build\pack-release.ps1         # installer + portable zip into artifacts\
 ```
 

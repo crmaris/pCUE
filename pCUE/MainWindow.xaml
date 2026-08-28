@@ -5,7 +5,7 @@
         xmlns:system="clr-namespace:System;assembly=mscorlib"
         xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"      
     
-    Title="pCUE - Cybenetics LTD" Height="630" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
+    Title="pCUE - Cybenetics LTD" Height="687" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
 
     <Window.Background>
         <LinearGradientBrush EndPoint="0.5,1" StartPoint="0.5,0">
@@ -23,7 +23,7 @@
         </x:ArrayExtension>
     </Window.Resources>
 
-    <Grid x:Name="Main_Window" Margin="0,0,3.4,0" Height="597" VerticalAlignment="Top">
+    <Grid x:Name="Main_Window" Margin="0,0,3.4,0" Height="654" VerticalAlignment="Top">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="51*"/>
             <ColumnDefinition Width="86*"/>
@@ -166,13 +166,28 @@
         <CheckBox x:Name="Update_On_Start_CheckBox" Content="On start" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="153,529,0,0" Foreground="#FFF5EFEF" ToolTip="Check for a newer pCUE version when the app starts (checks only - never installs on its own)" Checked="Update_On_Start_Changed" Unchecked="Update_On_Start_Changed"/>
         <TextBlock x:Name="Update_Status_Label" Grid.ColumnSpan="2" Text="" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="225,529,0,0" Width="379" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="White"/>
 
-        <Label Content="Remote:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16,556,0,0" Height="25"/>
-        <CheckBox x:Name="Remote_Enable_CheckBox" Content="Enable" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="76,561,0,0" Foreground="#FFF5EFEF" ToolTip="Allow pCUE to be controlled over HTTP. Without a token it listens on this PC only; set a token to allow access from the network." Checked="Remote_Settings_Changed" Unchecked="Remote_Settings_Changed"/>
-        <Label Content="Port:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="140,556,0,0" Height="25"/>
-        <TextBox x:Name="Remote_Port_Box" Grid.ColumnSpan="2" Text="5056" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="178,559,0,0" Width="46" Height="21" Background="#FF15743E" Foreground="#FFF6F1F1" HorizontalContentAlignment="Center" LostFocus="Remote_Settings_Changed"/>
-        <Label Content="Token:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="230,556,0,0" Height="25"/>
-        <PasswordBox x:Name="Remote_Token_Box" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="280,559,0,0" Width="104" Height="21" Background="#FF15743E" Foreground="#FFF6F1F1" ToolTip="Required for access from other machines. Leave empty to keep pCUE reachable only from this PC." LostFocus="Remote_Settings_Changed"/>
-        <CheckBox x:Name="Debug_Log_CheckBox" Content="Debug log" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="394,561,0,0" Foreground="#FFF5EFEF" ToolTip="Verbose logging to %LOCALAPPDATA%\pCUE\logs (and readable over the remote API)" Checked="Debug_Log_Changed" Unchecked="Debug_Log_Changed"/>
-        <TextBlock x:Name="Remote_Status_Label" Grid.ColumnSpan="2" Text="● Off" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="482,562,0,0" Width="122" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="#FFD3D3D3"/>
+        <Label Content="Target:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16,556,0,0" Height="25"/>
+        <ComboBox x:Name="Target_Mode_Combo" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="68,559,0,0" Width="78" Height="22" SelectionChanged="Target_Mode_SelectionChanged" ToolTip="Control hardware on this PC, or use this same interface to control another pCUE instance.">
+            <ComboBoxItem Content="This PC" IsSelected="True"/>
+            <ComboBoxItem Content="Remote"/>
+        </ComboBox>
+        <Label Content="Host:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="152,556,0,0" Height="25"/>
+        <TextBox x:Name="Remote_Client_Host_Box" Grid.ColumnSpan="2" Text="" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="192,559,0,0" Width="110" Height="21" Background="#FF15743E" Foreground="#FFF6F1F1" ToolTip="Remote PC name, IP address, or pCUE base URL." LostFocus="Remote_Client_Settings_Changed"/>
+        <Label Content="Port:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="307,556,0,0" Height="25"/>
+        <TextBox x:Name="Remote_Client_Port_Box" Grid.ColumnSpan="2" Text="5056" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="345,559,0,0" Width="46" Height="21" Background="#FF15743E" Foreground="#FFF6F1F1" HorizontalContentAlignment="Center" LostFocus="Remote_Client_Settings_Changed"/>
+        <Label Content="Token:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="396,556,0,0" Height="25"/>
+        <PasswordBox x:Name="Remote_Client_Token_Box" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="444,559,0,0" Width="93" Height="21" Background="#FF15743E" Foreground="#FFF6F1F1" ToolTip="Held in memory only and sent in the X-pCUE-Token header."/>
+        <Button x:Name="Remote_Client_Connect_Button" Content="Connect" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="544,557,0,0" Width="60" Height="24" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Remote_Client_Connect_Click"/>
+        <TextBlock x:Name="Remote_Client_Status_Label" Grid.ColumnSpan="2" Text="● This PC" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16,586,0,0" Width="520" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="White"/>
+        <Button x:Name="Remote_Client_Discover_Button" Content="Find" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="544,583,0,0" Width="60" Height="24" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Remote_Client_Discover_Click" ToolTip="Find a pCUE instance on the local network."/>
+
+        <Label Content="Allow remote:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16,614,0,0" Height="25"/>
+        <CheckBox x:Name="Remote_Enable_CheckBox" Content="Enable" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="105,619,0,0" Foreground="#FFF5EFEF" ToolTip="Allow this pCUE to be controlled over HTTP. Without a token it listens on this PC only; set a token to allow access from the network." Checked="Remote_Settings_Changed" Unchecked="Remote_Settings_Changed"/>
+        <Label Content="Port:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="169,614,0,0" Height="25"/>
+        <TextBox x:Name="Remote_Port_Box" Grid.ColumnSpan="2" Text="5056" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="207,617,0,0" Width="46" Height="21" Background="#FF15743E" Foreground="#FFF6F1F1" HorizontalContentAlignment="Center" LostFocus="Remote_Settings_Changed"/>
+        <Label Content="Token:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="258,614,0,0" Height="25"/>
+        <PasswordBox x:Name="Remote_Token_Box" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="306,617,0,0" Width="104" Height="21" Background="#FF15743E" Foreground="#FFF6F1F1" ToolTip="Required for access from other machines. Leave empty to keep pCUE reachable only from this PC." LostFocus="Remote_Settings_Changed"/>
+        <CheckBox x:Name="Debug_Log_CheckBox" Content="Local debug" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="419,619,0,0" Foreground="#FFF5EFEF" ToolTip="Verbose logging for this pCUE to %LOCALAPPDATA%\pCUE\logs." Checked="Debug_Log_Changed" Unchecked="Debug_Log_Changed"/>
+        <TextBlock x:Name="Remote_Status_Label" Grid.ColumnSpan="2" Text="● Off" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="510,620,0,0" Width="94" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="#FFD3D3D3"/>
     </Grid>
 </Window>

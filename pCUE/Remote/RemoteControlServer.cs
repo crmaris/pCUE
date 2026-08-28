@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -17,7 +18,7 @@ namespace pCUE
     public interface IRemoteControlTarget
     {
         /// <summary>Everything a caller might want to read, as a serializable object.</summary>
-        object GetStatus();
+        PcueStatusSnapshot GetStatus();
 
         /// <summary>Set fan power (0-100 %). Returns null on success, or an error message.</summary>
         string SetFanDuty(int fan, int duty);
@@ -27,6 +28,9 @@ namespace pCUE
 
         /// <summary>Set connection mode: auto | 3pin | 4pin | disconnect.</summary>
         string SetFanMode(int fan, string mode);
+
+        /// <summary>Apply the six setpoint boxes exactly as the GUI's Set Speed button does.</summary>
+        string ApplyFanSetpoints(int[] values);
 
         /// <summary>Start the software closed-loop RPM hold on a fan.</summary>
         string StartHold(int fan, int rpm);
@@ -48,6 +52,13 @@ namespace pCUE
 
         /// <summary>Reset the Min/Max/Avg statistics.</summary>
         string ResetStats();
+
+        /// <summary>Persistent/UI controls needed for a remote pCUE window to mirror the bench.</summary>
+        string SetAverageValues(bool on);
+        string SetAutoStart(bool on);
+        string SetAutoConnect(bool on);
+        string SetTachoAdjust(bool on);
+        string KillIcue();
 
         /// <summary>Current closed-loop tunables.</summary>
         object GetHoldConfig();
@@ -191,6 +202,10 @@ namespace pCUE
                             ReadInt(context, body, "fan", -1), ReadString(context, body, "value"))).ConfigureAwait(false);
                         return;
 
+                    case "/fans/apply":
+                        await Act(context, body => _target.ApplyFanSetpoints(ReadIntArray(body, "values"))).ConfigureAwait(false);
+                        return;
+
                     case "/hold/start":
                         await Act(context, body => _target.StartHold(
                             ReadInt(context, body, "fan", -1), ReadInt(context, body, "rpm", -1))).ConfigureAwait(false);
@@ -265,6 +280,30 @@ namespace pCUE
 
                     case "/reset":
                         await Act(context, body => _target.ResetStats()).ConfigureAwait(false);
+                        return;
+
+                    case "/settings/average":
+                        await Act(context, body => _target.SetAverageValues(
+                            ReadBool(context, body, "value", false))).ConfigureAwait(false);
+                        return;
+
+                    case "/settings/auto-start":
+                        await Act(context, body => _target.SetAutoStart(
+                            ReadBool(context, body, "value", false))).ConfigureAwait(false);
+                        return;
+
+                    case "/settings/auto-connect":
+                        await Act(context, body => _target.SetAutoConnect(
+                            ReadBool(context, body, "value", false))).ConfigureAwait(false);
+                        return;
+
+                    case "/settings/tacho-adjust":
+                        await Act(context, body => _target.SetTachoAdjust(
+                            ReadBool(context, body, "value", false))).ConfigureAwait(false);
+                        return;
+
+                    case "/system/kill-icue":
+                        await Act(context, body => _target.KillIcue()).ConfigureAwait(false);
                         return;
 
                     // ---- diagnostics -------------------------------------------------------
@@ -401,6 +440,7 @@ namespace pCUE
             return new
             {
                 app = "pCUE",
+                protocolVersion = PcueRemoteClient.MinimumProtocolVersion,
                 version = AppUpdateService.InstalledVersion,
                 endpoints = new[]
                 {
@@ -409,6 +449,7 @@ namespace pCUE
                     "POST /fan/duty?fan=1&value=60    - set fan power, 0-100 %",
                     "POST /fan/rpm?fan=1&value=800    - Commander fixed RPM (4-pin/PWM channels only)",
                     "POST /fan/mode?fan=1&value=3pin  - auto | 3pin | 4pin | disconnect",
+                    "POST /fans/apply                  - apply all six GUI setpoints in one operation",
                     "POST /hold/start?fan=1&rpm=800   - software closed-loop RPM hold",
                     "POST /hold/stop                  - stop the hold",
                     "POST /commander/open|close       - connect / disconnect the Commander PRO",
@@ -416,6 +457,8 @@ namespace pCUE
                     "POST /tach/connect|disconnect    - bench tachometer",
                     "POST /tach/assign?fan=2          - feed fan N's RPM from the tachometer (0 = none)",
                     "POST /reset                      - reset Min/Max/Avg statistics",
+                    "POST /settings/*                 - average, auto-start, auto-connect, tacho-adjust",
+                    "POST /system/kill-icue           - stop conflicting Corsair services",
                     "GET  /log?tail=200               - recent diagnostic log lines",
                     "GET  /log/level?value=debug      - read or set the log level",
                     "POST /log/clear                  - clear the in-memory log",
@@ -504,6 +547,32 @@ namespace pCUE
             if (body != null && body.TryGetValue(name, out object v) && v != null)
                 return Convert.ToString(v);
             return context.Request.QueryString[name] ?? "";
+        }
+
+        private static bool ReadBool(HttpListenerContext context, Dictionary<string, object> body,
+                                     string name, bool fallback)
+        {
+            string value = ReadString(context, body, name);
+            if (bool.TryParse(value, out bool parsed)) return parsed;
+            if (int.TryParse(value, out int number)) return number != 0;
+            return fallback;
+        }
+
+        private static int[] ReadIntArray(Dictionary<string, object> body, string name)
+        {
+            if (body == null || !body.TryGetValue(name, out object raw) || raw == null || raw is string)
+                return null;
+
+            var values = new List<int>();
+            if (raw is IEnumerable sequence)
+            {
+                foreach (object item in sequence)
+                {
+                    if (!int.TryParse(Convert.ToString(item), out int value)) return null;
+                    values.Add(value);
+                }
+            }
+            return values.ToArray();
         }
 
         private static async Task WriteJsonAsync(HttpListenerContext context, HttpStatusCode status, object payload)

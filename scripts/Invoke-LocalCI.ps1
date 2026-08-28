@@ -8,13 +8,15 @@
 
   Stages:
     1. Debug build   - must produce no NEW warnings beyond the known baseline.
-    2. UI layout     - renders every window off-screen and fails on overlapping controls.
+    2. Remote API    - runs a loopback server/client integration test, including authentication,
+                       SSE snapshots, typed commands and protocol-version rejection.
+    3. UI layout     - renders every window off-screen and fails on overlapping controls.
                        This exists because overlaps kept shipping: BATT LOW sat on top of the
                        tachometer status, "RPM:" on the fan selector, the hold status on
                        "Auto connect", and the Commander "Status:" label on its own value. Each
                        was found by eye, and the battery one was invisible until the moment it
                        mattered. All are the same one-line mistake in absolute margins.
-    3. Release pack  - proves the installer still builds. Skipped with -NoPack, because it bumps
+    4. Release pack  - proves the installer still builds. Skipped with -NoPack, because it bumps
                        the version.
 
 .EXAMPLE
@@ -56,6 +58,20 @@ $msbuild = Get-MSBuild
 
 Step 'Build (Debug)' {
     & $msbuild (Join-Path $root 'pCUE\pCUE.csproj') /t:Rebuild /p:Configuration=Debug /v:minimal /nologo
+}
+
+Step 'Remote protocol integration' {
+    $testProject = Join-Path $root 'tests\RemoteProtocolTests\RemoteProtocolTests.csproj'
+    & $msbuild $testProject /t:Rebuild /p:Configuration=Debug /v:minimal /nologo
+    if ($LASTEXITCODE -ne 0) { return }
+    & (Join-Path $root 'tests\RemoteProtocolTests\bin\Debug\pCUE.RemoteProtocolTests.exe')
+    if ($LASTEXITCODE -ne 0) { return }
+
+    $cli = Join-Path $root 'tools\pcue-cli.ps1'
+    $tokens = $null
+    $parseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile($cli, [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
 }
 
 Step 'UI layout' {
