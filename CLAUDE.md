@@ -333,7 +333,7 @@ fail = attach `B_phase*.json` timelines). If A SKIPs because no channel is 3-pin
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
-### 2026-08-28 — In-app remote pCUE completed; 1.5.5 package built
+### 2026-08-28 — In-app remote pCUE shipped as 1.5.5
 - Added the Target strip and the embedded `PcueRemoteClient`: a local pCUE can now select Remote,
   discover/enter another pCUE, connect with a memory-only token, receive live CPU/fan/tach/hold
   readings in the normal controls, and drive the full existing interface. No browser, PowerShell,
@@ -353,6 +353,13 @@ fail = attach `B_phase*.json` timelines). If A SKIPs because no channel is 3-pin
   `pCUE_1.5.5_setup.exe` (2,616,944 bytes), SHA-256
   `525392D64FF54DDC1A22D49C91646FE08CB49E81BFC8A6E3BA764BFC62A38B05`; portable zip 652,501
   bytes, SHA-256 `6A74D9D382A4E36897205DF5E8861B3E57760ED11C5EDD8A78E8089602D8A2A2`.
+- Implementation commit `63bc3fc` merged through **pCUE PR #5** as `fc295d3`; release
+  https://github.com/crmaris/pCUE/releases/tag/v1.5.5 targets that merge. GitHub's server-side
+  digests match both local artifacts, and an anonymous 2,616,944-byte installer download re-hashed
+  to the exact manifest digest above.
+- **powenetics-updates PR #4** published `apps.pcue` 1.5.5 through merge `b2c00f2`; the public raw
+  manifest was fetched with a cache-busting query and verified to contain the 1.5.5 asset URL and
+  exact installer SHA-256. Both pCUE PCs must update to 1.5.5+ before GUI-to-GUI control works.
 - Hardware check before implementation: on the remote Sound-PC, Fan #2 showed 0 RPM and did not
   start at 100% in either 3-pin/DC or 4-pin/PWM mode. Its original 3-pin, 40%, Sync state was
   restored. With the connector confirmed seated by the owner, that result points outside the
