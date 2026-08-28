@@ -142,5 +142,29 @@ namespace pCUE.Properties {
                 this["Tacho_Adjust"] = value;
             }
         }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string Remote_Client_Host {
+            get {
+                return ((string)(this["Remote_Client_Host"]));
+            }
+            set {
+                this["Remote_Client_Host"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("5056")]
+        public int Remote_Client_Port {
+            get {
+                return ((int)(this["Remote_Client_Port"]));
+            }
+            set {
+                this["Remote_Client_Port"] = value;
+            }
+        }
     }
 }

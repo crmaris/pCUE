@@ -126,9 +126,15 @@
                     <Bold>Check for Updates</Bold> looks for a newer pCUE. It verifies the download's
                     checksum and always asks before installing; <Bold>On start</Bold> only checks, it never
                     installs on its own.
-                    <LineBreak/><Bold>Remote</Bold> lets pCUE be driven over HTTP. With the
-                    <Bold> Token</Bold> box empty it listens on this PC only; entering a token is what allows
-                    access from other machines, and every such request must then present it.
+                    <LineBreak/><Bold>Target</Bold> chooses whether this window controls <Bold>This PC</Bold>
+                    or another <Bold>Remote pCUE</Bold>. For a remote target, enter its PC name or IP,
+                    port and token, then press <Bold>Connect</Bold>; <Bold>Find</Bold> searches the LAN.
+                    The same fan, Commander, CPU and tachometer controls then operate that PC, and all
+                    readings shown here are its live readings. The host and port are remembered, but
+                    the client token is kept in memory only.
+                    <LineBreak/><Bold>Allow remote</Bold> lets another pCUE or the CLI control this PC.
+                    With the <Bold> Token</Bold> box empty it listens on this PC only; entering a token is
+                    what allows access from other machines, and every such request must then present it.
                     <Bold> Debug log</Bold> records detailed diagnostics to
                     %LOCALAPPDATA%\pCUE\logs, which is what to send if something misbehaves.
                 </TextBlock>

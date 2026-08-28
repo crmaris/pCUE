@@ -7,7 +7,8 @@ current. `AGENTS.md` is a thin pointer to this file.
 ## What it does
 Reads the Commander PRO over USB-HID and shows per-fan RPM (Current/Min/Max/Avg) plus CPU
 Temp/MHz/Load; lets the user set fan mode (Auto / 3-pin / 4-pin / Disconnect), fan speed
-(PWM % or fixed RPM), sync all fans, and auto-start with Windows. Requires admin (manifest
+(PWM % or fixed RPM), sync all fans, and auto-start with Windows. The same window can target local
+hardware or another pCUE PC and mirror/control it live. Requires admin (manifest
 `requireAdministrator`) so LibreHardwareMonitor can load its kernel driver.
 
 ## Key files (all under `pCUE/`)
@@ -20,7 +21,13 @@ Temp/MHz/Load; lets the user set fan mode (Auto / 3-pin / 4-pin / Disconnect), f
   `_lastCommandedDuty` tracking (only updated on ACCEPTED writes).
 - `CorsairLightingProtocolConstants.cs` — Commander PRO HID command bytes.
 - `Tachometer/HidTachometer.cs` — external bench tachometer driver (see session log).
+- `Remote/PcueRemoteModels.cs` — protocol-v2 typed status/action/discovery contract.
+- `Remote/PcueRemoteClient.cs` — embedded HTTP/SSE client, command serialization, discovery, and
+  automatic reconnect. It is part of pCUE; the PowerShell CLI is not a GUI dependency.
+- `Remote/RemoteControlServer.cs` — authenticated local/LAN control API used by another pCUE and
+  the optional CLI.
 - `Properties/AssemblyInfo.cs` — versions.
+- `tests/RemoteProtocolTests/` (at repo root) — dependency-free net48 loopback integration suite.
 
 ## How the numeric fan box works (important)
 One `UIntegerUpDown` per fan does double duty: on **Set Speed**, value **≤ 100 → PWM power %**
@@ -144,13 +151,27 @@ is how Windows recognises an in-place upgrade. `PrivilegesRequired=admin` (the a
 `CloseApplications=yes` so an update can replace a running `pCUE.exe`, and the HKCU `Run` value is
 removed on **uninstall only** so an in-place update keeps the user's Auto Start choice.
 
-## Remote control + debug logging
-Modelled on Powenetics V3's `RemoteControlServer`, so the two apps behave the same way. **Off unless
-asked for on the command line** — nothing is persisted and no token is ever written to disk.
+## In-app remote pCUE + debug logging
+The main window's **Target** strip selects **This PC** or **Remote**. Remote uses the same fan,
+Commander, CPU, tachometer, settings and Reset/Kill buttons; incoming typed snapshots update the
+existing controls, and edits are sent back through the embedded client. It consumes a continuous
+SSE status stream at 500 ms and reconnects with bounded 1/2/5/10-second backoff after a network
+loss. Host/port persist; the **client token is memory-only** and is sent only in `X-pCUE-Token`.
+
+The remote instance must run protocol v2 (`status.protocolVersion >= 2`, first shipped in 1.5.5).
+Older pCUE versions are rejected with a clear update message rather than producing a half-working
+UI. In client mode this instance temporarily stops its own API/beacon so it cannot proxy a request
+to a third PC. Its local Commander/tach session keeps running; local UI state and monitoring are
+restored when Target returns to This PC.
+
+On the target, **Allow remote** starts the `RemoteControlServer` and passive discovery beacon. The
+server setting, port and server token are user-scoped settings and persist. An empty server token
+binds to loopback only; a non-empty token is what enables the LAN prefix. Command-line flags remain
+available for one-off/automation launches:
 
 ```
-pCUE.exe --remote --debug                                                  # loopback only
-pCUE.exe --remote-prefix=http://+:5056/ --remote-token=SECRET --debug      # LAN
+pCUE.exe --remote --debug                              # loopback, saved/default port
+pCUE.exe --remote-port=5056 --remote-token=SECRET      # LAN, token required
 ```
 
 - `--debug` sets the log to **Debug** and mirrors it to
@@ -160,16 +181,23 @@ pCUE.exe --remote-prefix=http://+:5056/ --remote-token=SECRET --debug      # LAN
   goes in `X-pCUE-Token` or `?token=`. Binding a non-loopback prefix needs elevation (pCUE already
   runs elevated) and a firewall rule for TCP 5056 / UDP 5057.
 - **Discovery** (`Remote/DiscoveryBeacon.cs`): a *passive* UDP responder on 5057 — it answers a
-  `PCUE_DISCOVER` probe with app/version/host/url/requiresToken and is otherwise silent. It never
-  returns the token.
+  `PCUE_DISCOVER` probe with app/protocolVersion/version/host/url/requiresToken and is otherwise
+  silent. It never returns the token.
 - **CLI:** `tools/pcue-cli.ps1` reaches **every** endpoint; `tools/pcue.cmd` is a shim so it reads
   as `pcue status`. `pcue commands` prints the lot. Host and token come from `PCUE_SERVER` /
-  `PCUE_TOKEN` so they are not retyped — and the token is **never written to disk**, matching the
-  app. With no server named it tries loopback, then LAN discovery. `-Json` on anything for raw
-  output. **Exit codes are load-bearing** — `0` ok, `1` pCUE refused, `2` nothing reachable,
-  `3` bad usage — so a bench script can tell "the app said no" from "the app was not there".
-  The old spellings (`debug`, `cpu-start/stop`, `tach-connect/disconnect`) are kept as aliases.
+  `PCUE_TOKEN`, so the CLI token is never written to disk. With no server named it tries loopback,
+  then LAN discovery. `apply` sends all six GUI setpoints atomically; `average`, `autostart`,
+  `autoconnect`, `tach-adjust`, and `kill-icue` cover the new GUI parity endpoints. `-Json` on
+  anything for raw output. **Exit codes are load-bearing** — `0` ok, `1` pCUE refused, `2` nothing
+  reachable, `3` bad usage — so a bench script can tell "the app said no" from "the app was not
+  there". The old spellings (`debug`, `cpu-start/stop`, `tach-connect/disconnect`) remain aliases.
   `GET /` lists every endpoint at runtime.
+
+### Protocol-v2 validation
+`scripts/Invoke-LocalCI.ps1` now builds/runs `tests/RemoteProtocolTests`: correct-token and
+wrong-token paths, typed status and SSE snapshots, all GUI-parity routes, six-setpoint JSON body,
+stream loss plus automatic reconnect, manual disconnect, and rejection of protocol v1. The same
+pipeline parses the CLI, renders/measures both WPF windows, and packages the installer.
 
 ### Logging (`pCUE/Diagnostics/AppLog.cs`) — read this before adding diagnostics
 The rest of the app logs through `Debug.WriteLine`, which is `[Conditional("DEBUG")]` and therefore
@@ -305,7 +333,33 @@ fail = attach `B_phase*.json` timelines). If A SKIPs because no channel is 3-pin
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
-### 2026-08-25 (latest) — The status-byte check was reading the report id, so it never fired
+### 2026-08-28 — In-app remote pCUE completed; 1.5.5 package built
+- Added the Target strip and the embedded `PcueRemoteClient`: a local pCUE can now select Remote,
+  discover/enter another pCUE, connect with a memory-only token, receive live CPU/fan/tach/hold
+  readings in the normal controls, and drive the full existing interface. No browser, PowerShell,
+  or companion GUI is involved. The client reconnects automatically and rejects old protocol
+  versions cleanly.
+- Promoted `/status` to the typed protocol-v2 contract and added atomic `/fans/apply`, remote UI
+  settings, and `/system/kill-icue`. Discovery advertises the protocol version. The CLI gained
+  matching commands.
+- Target switching stops the local API to prevent proxy chains but preserves the local Commander,
+  tachometer, fan polling, hold and UI choices; only local CPU polling pauses while remote readings
+  own the screen, then resumes if it was running.
+- Added the net48 loopback integration project and made it a local-CI gate. Verified: wrong-token
+  rejection, status/SSE, every new route, server loss/restart/reconnect, protocol-v1 rejection,
+  CLI parse, and WPF layout (**18 Help controls + 116 Main controls, zero overlaps**). The full
+  pipeline passed with only the four pre-existing HidSharp obsolete warnings.
+- Built the required unsigned **1.5.5** artifacts from a clean Release stage: installer
+  `pCUE_1.5.5_setup.exe` (2,616,944 bytes), SHA-256
+  `525392D64FF54DDC1A22D49C91646FE08CB49E81BFC8A6E3BA764BFC62A38B05`; portable zip 652,501
+  bytes, SHA-256 `6A74D9D382A4E36897205DF5E8861B3E57760ED11C5EDD8A78E8089602D8A2A2`.
+- Hardware check before implementation: on the remote Sound-PC, Fan #2 showed 0 RPM and did not
+  start at 100% in either 3-pin/DC or 4-pin/PWM mode. Its original 3-pin, 40%, Sync state was
+  restored. With the connector confirmed seated by the owner, that result points outside the
+  percentage/mode UI path (fan, power/contact, channel, or wiring still needs physical isolation).
+  The bench still ran 1.5.4, so cross-PC GUI validation requires updating both ends to 1.5.5.
+
+### 2026-08-25 — The status-byte check was reading the report id, so it never fired
 Verifying the 1.5.3 work found that **enforcing the status byte was inert**. `LogExchange` read
 `_in[0]`, which is the HID **report id** — always `0x00`, and `PROTOCOL_RESPONSE_OK` is `0x00`, so
 `ok` was unconditionally true. Consequences, all of them silent: `WriteFan*` always returned true,

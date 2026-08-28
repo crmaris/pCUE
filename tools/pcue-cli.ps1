@@ -9,7 +9,7 @@
 
   The app must be running with Remote ticked (bottom strip). Loopback needs no token; any other
   machine does. Put it in PCUE_TOKEN rather than typing it every time - this script deliberately
-  does NOT write it to disk, matching the app, which never persists it either.
+  does NOT write it to disk, matching pCUE's in-app remote client.
 
   Set PCUE_SERVER to point at a bench box by default. With neither that nor -Server, the CLI
   tries localhost first and then asks the LAN (UDP 5057) who is listening.
@@ -124,12 +124,22 @@ function Resolve-Base {
     Die 'No pCUE found. Start it and tick Remote (bottom strip), or pass -Server.' $EXIT_UNREACHABLE
 }
 
-function Invoke-Api([string]$Path, [string]$Method = 'Get') {
+function Invoke-Api([string]$Path, [string]$Method = 'Get', [object]$Body = $null) {
     $base = Resolve-Base
     $headers = @{}
     if ($Token) { $headers['X-pCUE-Token'] = $Token }
     try {
-        return Invoke-RestMethod -Uri "$base$Path" -Method $Method -Headers $headers -TimeoutSec $TimeoutSec
+        $request = @{
+            Uri = "$base$Path"
+            Method = $Method
+            Headers = $headers
+            TimeoutSec = $TimeoutSec
+        }
+        if ($null -ne $Body) {
+            $request.Body = $Body | ConvertTo-Json -Depth 6 -Compress
+            $request.ContentType = 'application/json'
+        }
+        return Invoke-RestMethod @request
     } catch {
         # Everything hinges on whether a response came back at all. PowerShell 7 fills in
         # ErrorDetails even when the connection was refused, so testing that first blames pCUE
@@ -249,6 +259,7 @@ pCUE CLI - every command
     duty <fan|all> <0-100>     set fan power %
     rpm  <fan> <rpm>           Commander fixed RPM (4-pin channels only)
     mode <fan> <auto|3pin|4pin|disconnect>
+    apply <v1> ... <v6>        apply the six GUI setpoint boxes together
     reset                      clear Min/Max/Avg statistics
 
   Closed-loop RPM hold
@@ -267,6 +278,11 @@ pCUE CLI - every command
     tach <connect|disconnect>
     assign <fan|none>          which fan the tachometer measures
     cpu <on|off>               CPU monitoring
+    average <on|off>           show running average instead of minimum
+    autostart <on|off>         launch pCUE with Windows
+    autoconnect <on|off>       connect hardware when pCUE starts
+    tach-adjust <on|off>       closed-loop tachometer adjustment
+    kill-icue                  stop the iCUE services
 
   Diagnostics
     log [lines]                recent log (default 100)
@@ -347,6 +363,21 @@ pCUE CLI - every command
         break
     }
 
+    'apply' {
+        Need 6 'apply <fan1> <fan2> <fan3> <fan4> <fan5> <fan6>'
+        if ($Rest.Count -ne 6) { Die 'apply requires exactly six setpoints.' $EXIT_USAGE }
+        $values = @()
+        foreach ($value in $Rest) {
+            $parsed = 0
+            if (-not [int]::TryParse($value, [ref]$parsed) -or $parsed -lt 0 -or $parsed -gt 3500) {
+                Die "Every setpoint must be 0-3500 (got '$value')." $EXIT_USAGE
+            }
+            $values += $parsed
+        }
+        Out-Result (Invoke-Api '/fans/apply' 'Post' @{ values = $values })
+        break
+    }
+
     'hold' {
         Need 2 'hold <fan> <rpm>'
         $fan = Get-FanArg $Rest[0]
@@ -400,6 +431,24 @@ pCUE CLI - every command
     }
 
     'reset' { Out-Result (Invoke-Api '/reset?x=1' 'Post'); break }
+
+    { $_ -in @('average', 'autostart', 'autoconnect', 'tach-adjust') } {
+        Need 1 "$Command <on|off>"
+        $value = $Rest[0].ToLowerInvariant()
+        if ($value -notin @('on', 'off')) { Die "$Command takes on or off." $EXIT_USAGE }
+        $path = @{
+            average = 'average'
+            autostart = 'auto-start'
+            autoconnect = 'auto-connect'
+            'tach-adjust' = 'tacho-adjust'
+        }[$Command.ToLowerInvariant()]
+        $number = 0
+        if ($value -eq 'on') { $number = 1 }
+        Out-Result (Invoke-Api "/settings/$path?value=$number" 'Post')
+        break
+    }
+
+    'kill-icue' { Out-Result (Invoke-Api '/system/kill-icue?x=1' 'Post'); break }
 
     # Spellings from the previous version of this script. Kept because bench scripts and the
     # handover notes already use them, and silently breaking those to tidy up a command list
