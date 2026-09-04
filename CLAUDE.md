@@ -729,3 +729,16 @@ All three shipped and **verified on the bench on 1.4.6**.
 - Measurement only — fan *control* is unchanged (still Commander PRO PWM/RPM).
 - File version bumped to 1.3.0.17 (Release). Prior work this session: replaced Core Temp with
   LibreHardwareMonitor (commit 36d8f71).
+
+## Workspace hygiene (owner directive 2026-09-04)
+
+A scheduled job in `E:\All projects\Workspace Maintenance` prunes, without asking, `bin/ obj/ .vs/
+packages/ node_modules/ .venv/ __pycache__/` older than 7 days and agent scratch (`.codex-tmp/
+*-temp*/ dotnet-temp*/ NuGetScratch/`) older than 7 days. It never deletes CI / validation output
+under `artifacts\` — **that is this session's job**: before the handover update, delete the validation
+checkouts, `local-ci` runs, `terra-*` / `*-temp*` folders, staging trees and test packages you created
+and no longer need, plus anything there older than 14 days that this document does not cite by path.
+Keep only what this document names as provenance, rollback or evidence, and the newest release package.
+Scratch goes in `.codex-tmp\` (Codex) or the session scratchpad (Claude), never in `artifacts\`.
+`Remove-Item` is blocked on these paths — use `[System.IO.Directory]::Delete($path, $true)`.
+Full rules and the protected-path registry: `E:\All projects\Workspace Maintenance\CLAUDE.md`.
