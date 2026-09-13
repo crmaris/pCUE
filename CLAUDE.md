@@ -374,9 +374,31 @@ fail = attach `B_phase*.json` timelines). If A SKIPs because no channel is 3-pin
   SHA-256 `A7EAEBBA5F1F27EE10969C6E8E9A1FFE71D97731FFB3AA61E51AF71C9B580655`.
   Portable payload hashes match the clean Release stage. Removed only this audit's baseline,
   new test build output and release stage. Retained installer/ZIP and the cited bench evidence.
-- **1.5.6 installation and hardware acceptance remain pending**; the physical results above do
-  not validate the new build. Re-run both target directions, stop/manual takeover, retarget and
-  signal-loss/reconnect on 1.5.6 at the bench before marking that acceptance complete.
+- Published through [pCUE PR #7](https://github.com/crmaris/pCUE/pull/7), merge
+  `21c580ef79c493e97af570d31449a34613274632`; the remote default branch contains implementation
+  `6cd713493ad4d70f8e00cec486d53eab35e13d38`. Release
+  https://github.com/crmaris/pCUE/releases/tag/v1.5.6 targets that merge.
+  [Updater PR #5](https://github.com/crmaris/powenetics-updates/pull/5), merge
+  `0ae244e2a07e0d6618d3012d87128f190e693957`, updates only apps.pcue version/URL/hash.
+  Verified the anonymous public manifest and re-downloaded installer against the exact SHA-256.
+  Compact release proof: `artifacts/evidence/tachometer-2026-09-13/release-verification.json`.
+  Publication scratch and the verification download were removed after recording that proof.
+- **1.5.6 installed by the owner and verified through the Sound-PC API in this session.** Repeated
+  the attended Fan #3 tests on the updated build: 1000 -> **995 RPM at 25%**, descending 800 ->
+  **791-792 at 20%**, returning to 1000 -> **995 at 25%**, reconnect/restart 950 -> **954-955 at
+  24%**. All are within the default +/-20 RPM tolerance. Manual 24% after Stop stayed applied;
+  tachometer loss immediately reported Correcting/no signal, then Fault after eight bad samples,
+  preserving 24%. Reconnection restored control. Removing the assignment stopped the hold while
+  leaving duty unchanged. An invalid minDuty=120 request returned HTTP 400 without changing the
+  running target or limits. These targeted hardware acceptance checks passed on **1.5.6**.
+- **Remaining limitation: the startup kick overshoots from rest.** The recorded peak was 1759 RPM
+  on the initial 1000-RPM run, before it converged to 995. The kick/settling strategy was retained;
+  do not claim monotonic startup or exact instantaneous target matching. Older 3-pin rejection,
+  power-readback-across-restart and other historical bench checks are separate from this acceptance.
+- Updated-build evidence: `artifacts/evidence/tachometer-2026-09-13/bench-1.5.6.json`. Final API
+  state verified: 1.5.6, hold Stopped, all six original modes and zero setpoints, Fan #3 0%/0 RPM,
+  tach connected at 0 RPM assigned to Fan #3, tacho adjustment enabled, target 950/start duty 23.
+  Sync remains off. The owner's PC was not controlled during API testing or installation.
 
 ### 2026-08-28 — In-app remote pCUE shipped as 1.5.5
 - Added the Target strip and the embedded `PcueRemoteClient`: a local pCUE can now select Remote,
