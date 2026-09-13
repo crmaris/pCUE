@@ -361,3 +361,13 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# agent scratch — auto-pruned weekly by E:\All projects\Workspace Maintenance (owner 2026-09-04)
+# Anchored to the repo root on purpose. An earlier version used `.codex-*/`, which also matched the
+# legitimate plugin directory `.codex-plugin/`, and `.codex/` / `.agents/` / `*-temp/`, which can
+# hide real configuration at any depth. Narrowed 2026-09-04 after a second-opinion review.
+/.codex-tmp/
+/.worktrees/
+/.claude/worktrees/
+/NuGetScratch/
+/.build-tmp/

@@ -75,9 +75,9 @@ Because the Commander will not regulate by RPM on a DC channel, pCUE closes that
 from the Fan Control Application's `FanRpmController` (step-based proportional: coarse step when far
 from target, fine step when near — deliberately not an aggressive PID).
 
-**Feedback source is whatever is live.** `ReadHeldFanRpm()` returns the value pCUE already shows in
-the Current column, which is the bench tachometer when one is assigned to that fan and fresh, and
-the Commander's own tach reading otherwise. So one loop covers both a fan with no usable tach wire
+**Feedback source is whatever is live.** `ReadHeldFanRpm(channel)` checks the assigned bench
+tachometer directly at control-read time, then falls back to a separately cached fresh Commander
+reading. Display-cache timestamps cannot extend the external reading's lifetime. So one loop covers both a fan with no usable tach wire
 and a 3-pin fan the Commander can read but won't regulate. It refuses to start with no feedback
 rather than running blind.
 
@@ -95,6 +95,13 @@ Stops on: user Stop, lost feedback (8 consecutive bad samples — **fan is left 
 still cooling), saturation at 0/100% while off target, timeout to first stable, manual **Set Speed**
 (the user taking over), a device-rejected duty write (the actuator lambda throws; the loop faults
 out instead of steering blind), Commander disconnect, and app close.
+
+Since 1.5.6, Stop serializes cancellation with actuator writes: once it returns, the old loop cannot
+overwrite a manual command or a replacement hold. Each hold captures its own channel and validated
+configuration. Changing the tach assignment or held fan's mode stops the hold; viewing a remote PC
+does not change the local tach assignment. Invalid settings are refused atomically. Only the target
+changes live; other settings apply on the next start. Retargeting clears all previous target history
+and starts a new timeout/stabilization window. Missing feedback clears Stable immediately.
 
 ## Hard constraints — do not break
 - **LibreHardwareMonitorLib pinned at 0.9.4.** Do not upgrade (0.9.5+ force HidSharp 2.6.4, which
@@ -333,6 +340,44 @@ fail = attach `B_phase*.json` timelines). If A SKIPs because no channel is 3-pin
   RPM target only works if the Commander can read that fan's sense wire.
 
 ## Session log (newest first)
+### 2026-09-13 — Tachometer audit and RPM-hold reliability fixes, 1.5.6
+- Added 14 hardware-free regression scenarios using the actual controller and tachometer decoder.
+  The original controller passed 7/14; the corrected controller passes 14/14. Reproduced late writes
+  after Stop, a cancelled startup kick, stale best-duty history after retargeting with dither off,
+  false Stable after feedback loss, startup writes before checking connection, mutable running
+  duty limits, and acceptance of invalid envelopes. All seven regressions are corrected.
+- Bound each hold's read/write callbacks to its own channel; ignored superseded UI callbacks;
+  preserved local tach assignment while remote snapshots update the screen. Hold feedback reads
+  the external tach directly, preserving the existing fresh-Commander fallback. Fan mode/assignment
+  changes stop the prior hold. Startup read/config errors now produce an operator-visible refusal.
+- Preserved the 4-second settling delay, default +/-20 RPM tolerance, startup kick, dithering
+  strategy, pinned libraries and AssemblyVersion 1.1.0.0. Configuration writes validate as a unit;
+  a running loop owns its own copy. Local CI/pack MSBuild runs use one worker and no node reuse.
+- Full local CI passed: 14/14 control/decoder tests, remote protocol integration, CLI parse,
+  WPF layout (18 Help + 116 Main controls, no overlaps), and clean Release installer packaging.
+  Only the four existing HidSharp obsolete warnings. This repository has no Actions workflows;
+  the Desktop CI handover was absent and not found in Recycle Bin. No runner changes were made.
+- **Live bench testing was on existing 1.5.5**, Sound-PC / DESKTOP-OU4447V, Fan #3 in 4-pin mode,
+  with the owner confirming the optical tachometer was aimed and ready. API-driven results:
+  1000 RPM -> 995-999 RPM at 25%; descending 800 -> 791 RPM at 20%; back to 1000 -> 995 at 25%;
+  reconnect/restart 950 -> 954 at 24%. Starting from rest overshot before converging; do not claim
+  a monotonic startup. Disconnecting the tach left Commander RPM at zero, proving these runs used
+  external feedback; the loop faulted after eight invalid samples while preserving 25% duty.
+  It incorrectly displayed Stable during those missing samples (fixed in 1.5.6, offline verified).
+- Retained before/config/timeline/after evidence in
+  `artifacts/evidence/tachometer-2026-09-13/bench-1.5.5.json` (no credentials). Restored all six
+  modes/setpoints, connected tach assigned to Fan #3, adjust enabled, original target/config and
+  stopped hold / Fan #3 0% duty. **Sync remains unchecked**: it was disabled through TeamViewer
+  before the owner requested background-only API control. No further screen interaction followed.
+- Built unsigned `artifacts/pCUE_1.5.6_setup.exe`, SHA-256
+  `59F0CDED2B54E313F5B10A00657767A854C699D057A348B1061C3BFFD0450CD8`, and portable ZIP,
+  SHA-256 `A7EAEBBA5F1F27EE10969C6E8E9A1FFE71D97731FFB3AA61E51AF71C9B580655`.
+  Portable payload hashes match the clean Release stage. Removed only this audit's baseline,
+  new test build output and release stage. Retained installer/ZIP and the cited bench evidence.
+- **1.5.6 installation and hardware acceptance remain pending**; the physical results above do
+  not validate the new build. Re-run both target directions, stop/manual takeover, retarget and
+  signal-loss/reconnect on 1.5.6 at the bench before marking that acceptance complete.
+
 ### 2026-08-28 — In-app remote pCUE shipped as 1.5.5
 - Added the Target strip and the embedded `PcueRemoteClient`: a local pCUE can now select Remote,
   discover/enter another pCUE, connect with a memory-only token, receive live CPU/fan/tach/hold
@@ -729,3 +774,16 @@ All three shipped and **verified on the bench on 1.4.6**.
 - Measurement only — fan *control* is unchanged (still Commander PRO PWM/RPM).
 - File version bumped to 1.3.0.17 (Release). Prior work this session: replaced Core Temp with
   LibreHardwareMonitor (commit 36d8f71).
+
+## Workspace hygiene (owner directive 2026-09-04)
+
+A scheduled job in `E:\All projects\Workspace Maintenance` prunes, without asking, `bin/ obj/ .vs/
+packages/ node_modules/ .venv/ __pycache__/` older than 7 days and agent scratch (`.codex-tmp/
+*-temp*/ dotnet-temp*/ NuGetScratch/`) older than 7 days. It never deletes CI / validation output
+under `artifacts\` — **that is this session's job**: before the handover update, delete the validation
+checkouts, `local-ci` runs, `terra-*` / `*-temp*` folders, staging trees and test packages you created
+and no longer need, plus anything there older than 14 days that this document does not cite by path.
+Keep only what this document names as provenance, rollback or evidence, and the newest release package.
+Scratch goes in `.codex-tmp\` (Codex) or the session scratchpad (Claude), never in `artifacts\`.
+`Remove-Item` is blocked on these paths — use `[System.IO.Directory]::Delete($path, $true)`.
+Full rules and the protected-path registry: `E:\All projects\Workspace Maintenance\CLAUDE.md`.

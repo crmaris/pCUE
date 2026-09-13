@@ -57,12 +57,18 @@ function Get-MSBuild {
 $msbuild = Get-MSBuild
 
 Step 'Build (Debug)' {
-    & $msbuild (Join-Path $root 'pCUE\pCUE.csproj') /t:Rebuild /p:Configuration=Debug /v:minimal /nologo
+    & $msbuild (Join-Path $root 'pCUE\pCUE.csproj') /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo
+}
+
+Step 'Tachometer and RPM hold regression tests (no hardware)' {
+    & $msbuild (Join-Path $root 'tests\RpmHoldTests\RpmHoldTests.csproj') /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo
+    if ($LASTEXITCODE -ne 0) { return }
+    & (Join-Path $root 'tests\RpmHoldTests\bin\Debug\pCUE.RpmHoldTests.exe')
 }
 
 Step 'Remote protocol integration' {
     $testProject = Join-Path $root 'tests\RemoteProtocolTests\RemoteProtocolTests.csproj'
-    & $msbuild $testProject /t:Rebuild /p:Configuration=Debug /v:minimal /nologo
+    & $msbuild $testProject /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { return }
     & (Join-Path $root 'tests\RemoteProtocolTests\bin\Debug\pCUE.RemoteProtocolTests.exe')
     if ($LASTEXITCODE -ne 0) { return }

@@ -101,10 +101,10 @@ namespace pCUE
         //unnoticed. Cleared when the meter disconnects, which is what changing the cell does.
         bool tachBatteryLowSeen = false;
 
-        //Latest RPM per channel as shown in the Current column, i.e. AFTER the bench-tachometer
-        //override. The closed-loop RPM hold feeds on this, so it automatically uses the external
-        //tachometer when one is assigned and the Commander's own reading otherwise.
+        //Keep raw Commander samples separate from the displayed tachometer override. A hold
+        //checks the tachometer's freshness at read time, never a republished display timestamp.
         readonly int[] latestFanRpm = new int[6];
+        readonly int[] latestCommanderRpm = new int[6];
         DateTime latestFanRpmUtc = DateTime.MinValue;
         readonly object fanRpmLock = new object();
 
@@ -118,7 +118,7 @@ namespace pCUE
         const int HoldKickStartDuty = 40;
         //Live tunables for the hold loop, editable over the remote API so the controller can be
         //tuned against real hardware without rebuilding and redeploying the app.
-        readonly FanHoldConfig holdConfig = new FanHoldConfig();
+        FanHoldConfig holdConfig = new FanHoldConfig();
 
         //Optional HTTP remote-control server. Off unless enabled on the command line.
         RemoteControlServer remoteServer;
@@ -401,6 +401,12 @@ namespace pCUE
                             fanPollErrorLogged = false;
                             consecutivePollFailures = 0;
 
+                            lock (fanRpmLock)
+                            {
+                                Array.Copy(rpms, latestCommanderRpm, 6);
+                                latestFanRpmUtc = DateTime.UtcNow;
+                            }
+
                             //External bench tachometer override: for the assigned fan, replace the
                             //Commander PRO reading with the tach's RPM when it is fresh; if the tach
                             //signal is stale/lost (ReadRpm() == null) keep the Commander value.
@@ -415,7 +421,6 @@ namespace pCUE
                             lock (fanRpmLock)
                             {
                                 Array.Copy(rpms, latestFanRpm, 6);
-                                latestFanRpmUtc = DateTime.UtcNow;
                             }
 
                             if (!token.IsCancellationRequested)
@@ -591,6 +596,7 @@ namespace pCUE
                 default: type = FanDetectionType.Auto; break;
             }
 
+            if (selected_fan == holdChannel) StopRpmHold("fan mode changed");
             fanModeWriteOk[selected_fan] = commander.WriteFanDetectionType(selected_fan, type);
             if (!fanModeWriteOk[selected_fan])
             {
@@ -1409,41 +1415,56 @@ namespace pCUE
         /// </summary>
         public string SetHoldConfig(Func<string, double?> get)
         {
-            double? v;
-            if ((v = get("tolerance")).HasValue) holdConfig.RpmTolerance = v.Value;
-            if ((v = get("minDuty")).HasValue) holdConfig.MinDuty = (int)v.Value;
-            if ((v = get("maxDuty")).HasValue) holdConfig.MaxDuty = (int)v.Value;
-            if ((v = get("startDuty")).HasValue) holdConfig.StartDuty = (int)v.Value;
-            if ((v = get("coarseStep")).HasValue) holdConfig.CoarseDutyStep = (int)v.Value;
-            if ((v = get("fineStep")).HasValue) holdConfig.FineDutyStep = (int)v.Value;
-            if ((v = get("coarseThreshold")).HasValue) holdConfig.CoarseErrorThreshold = v.Value;
-            if ((v = get("sampleInterval")).HasValue) holdConfig.SampleIntervalMs = (int)v.Value;
-            if ((v = get("settleDelay")).HasValue) holdConfig.SettleDelayMs = (int)v.Value;
-            if ((v = get("stabilizeTime")).HasValue) holdConfig.StabilizationTimeMs = (int)v.Value;
-            if ((v = get("timeout")).HasValue) holdConfig.TimeoutMs = (int)v.Value;
-            if ((v = get("filterWindow")).HasValue) holdConfig.RpmFilterWindow = Math.Max(1, (int)v.Value);
-            if ((v = get("maxInvalid")).HasValue) holdConfig.MaxInvalidRpmSamples = Math.Max(1, (int)v.Value);
-            if ((v = get("dither")).HasValue)
+            return Dispatcher.Invoke(new Func<string>(delegate
             {
-                bool want = v.Value != 0;
-                AppLog.Info("Hold dither " + (want ? "enabled" : "disabled") + " via remote API.");
-                holdConfig.DitherEnabled = want;
-            }
-
-            if ((v = get("target")).HasValue)
-            {
-                holdConfig.TargetRpm = v.Value;
-                if (holdChannel >= 0 && holdChannel < Fan_Numeric_Boxes.Length)
-                    Dispatcher.Invoke(new Action(delegate { Fan_Numeric_Boxes[holdChannel].Value = (uint)v.Value; }));
-                if (rpmHold != null && rpmHold.IsRunning) rpmHold.UpdateTarget(v.Value);
-            }
-
-            if (holdConfig.MinDuty < 0) holdConfig.MinDuty = 0;
-            if (holdConfig.MaxDuty > 100) holdConfig.MaxDuty = 100;
-            if (holdConfig.RpmTolerance <= 0) holdConfig.RpmTolerance = 25;
-
-            AppLog.Info("Hold config updated via remote API.");
-            return null;
+                try
+                {
+                    //Apply atomically only after validating the whole request. A running loop
+                    //owns a separate copy; only UpdateTarget is intentionally live.
+                    var next = holdConfig.CopyValidated();
+                    double Number(string key, double current)
+                    {
+                        double value = get(key) ?? current;
+                        if (double.IsNaN(value) || double.IsInfinity(value))
+                            throw new ArgumentException(key + " must be finite.");
+                        return value;
+                    }
+                    int Whole(string key, int current)
+                    {
+                        double value = Number(key, current);
+                        if (value != Math.Truncate(value) || value < int.MinValue || value > int.MaxValue)
+                            throw new ArgumentException(key + " must be a whole number in range.");
+                        return (int)value;
+                    }
+                    next.RpmTolerance = Number("tolerance", next.RpmTolerance);
+                    next.MinDuty = Whole("minDuty", next.MinDuty);
+                    next.MaxDuty = Whole("maxDuty", next.MaxDuty);
+                    next.StartDuty = Whole("startDuty", next.StartDuty);
+                    next.CoarseDutyStep = Whole("coarseStep", next.CoarseDutyStep);
+                    next.FineDutyStep = Whole("fineStep", next.FineDutyStep);
+                    next.CoarseErrorThreshold = Number("coarseThreshold", next.CoarseErrorThreshold);
+                    next.SampleIntervalMs = Whole("sampleInterval", next.SampleIntervalMs);
+                    next.SettleDelayMs = Whole("settleDelay", next.SettleDelayMs);
+                    next.StabilizationTimeMs = Whole("stabilizeTime", next.StabilizationTimeMs);
+                    next.TimeoutMs = Whole("timeout", next.TimeoutMs);
+                    next.RpmFilterWindow = Whole("filterWindow", next.RpmFilterWindow);
+                    next.MaxInvalidRpmSamples = Whole("maxInvalid", next.MaxInvalidRpmSamples);
+                    next.DitherEnabled = Number("dither", next.DitherEnabled ? 1 : 0) != 0;
+                    next.TargetRpm = Number("target", next.TargetRpm);
+                    if (next.TargetRpm > 3500) return "target must be 1-3500 RPM.";
+                    next = next.CopyValidated();
+                    holdConfig = next;
+                    if (get("target").HasValue)
+                    {
+                        if (holdChannel >= 0 && holdChannel < Fan_Numeric_Boxes.Length)
+                            Fan_Numeric_Boxes[holdChannel].Value = (uint)next.TargetRpm;
+                        if (rpmHold != null && rpmHold.IsRunning) rpmHold.UpdateTarget(next.TargetRpm);
+                    }
+                    AppLog.Info("Hold config updated via remote API (target live; other settings on next start).");
+                    return null;
+                }
+                catch (ArgumentException ex) { return ex.Message; }
+            }));
         }
 
         /// <summary>
@@ -2151,23 +2172,23 @@ namespace pCUE
         #endregion
 
         #region Closed-loop RPM hold
-        //Feedback for the control loop: the RPM most recently shown for the held channel. That value
-        //is already the bench tachometer's reading when one is assigned to this fan and fresh, and
-        //the Commander's own tach reading otherwise - so the loop works for a fan with no usable
-        //tach wire AND for a 3-pin fan the Commander can read but refuses to regulate.
-        //Returns null (an invalid sample, from the loop's point of view) when there is no
-        //trustworthy reading: nothing polled recently, or a zero, which means "no signal".
-        private double? ReadHeldFanRpm()
+        //Prefer the assigned external tachometer, preserving the existing Commander fallback.
+        //Read it directly so reassignments and expired readings cannot survive in the display cache.
+        private double? ReadHeldFanRpm(int ch)
         {
-            int ch = holdChannel;
             if (ch < 0 || ch > 5) return null;
+            if (ch == tachAssignedChannel)
+            {
+                double? tachRpm = bench_tach?.ReadRpm();
+                if (tachRpm.HasValue) return tachRpm.Value > 0 ? tachRpm : null;
+            }
 
             lock (fanRpmLock)
             {
                 if (latestFanRpmUtc == DateTime.MinValue) return null;
                 //The poll loop runs every 500 ms; anything older than 2 s means it has stalled.
                 if ((DateTime.UtcNow - latestFanRpmUtc).TotalMilliseconds > 2000) return null;
-                int rpm = latestFanRpm[ch];
+                int rpm = latestCommanderRpm[ch];
                 return rpm > 0 ? (double?)rpm : null;
             }
         }
@@ -2175,8 +2196,9 @@ namespace pCUE
         //True while the RPM poll loop is delivering fresh samples, whatever their VALUE. This is the
         //"can this fan be measured at all" test, as opposed to ReadHeldFanRpm's "is it turning right
         //now" - a stopped fan is a perfectly normal starting point for the hold, which spins it up.
-        private bool HasFreshRpmSource()
+        private bool HasFreshRpmSource(int channel)
         {
+            if (channel == tachAssignedChannel && bench_tach?.ReadRpm() != null) return true;
             lock (fanRpmLock)
             {
                 if (latestFanRpmUtc == DateTime.MinValue) return false;
@@ -2188,9 +2210,21 @@ namespace pCUE
         //Called from Set Speed (the normal route) and from the remote API.
         private void StartRpmHold(int channel, double targetRpm)
         {
+            try { StartRpmHoldCore(channel, targetRpm); }
+            catch (Exception ex)
+            {
+                AppLog.Error("Could not start RPM hold: " + ex.Message);
+                SetHoldStatus("Could not start: " + ex.Message, UpdateAlertBrush);
+            }
+        }
+
+        private void StartRpmHoldCore(int channel, double targetRpm)
+        {
             if (channel < 0 || channel > 5) { SetHoldStatus("Pick a fan first.", UpdateAlertBrush); return; }
             if (!Corsair_Commander_Connected) { SetHoldStatus("Open the Commander PRO first.", UpdateAlertBrush); return; }
 
+            StopRpmHold("replacement hold");
+            var runConfig = holdConfig.CopyValidated();
             holdChannel = channel;
 
             //Refuse only when nothing is measuring at all. A STOPPED fan reads 0, which
@@ -2201,7 +2235,7 @@ namespace pCUE
             //The loop applies its start duty and waits SettleDelayMs before its first sample, which
             //is ample for a fan to spin up; if the channel genuinely cannot be measured it stops
             //itself on consecutive bad samples and leaves the fan running rather than stopped.
-            if (!HasFreshRpmSource())
+            if (!HasFreshRpmSource(channel))
             {
                 SetHoldStatus("No RPM readings for Fan #" + (channel + 1) +
                               " - connect the tachometer and point it at this fan.", UpdateAlertBrush);
@@ -2220,7 +2254,7 @@ namespace pCUE
             //a spinning fan at a real 0% duty is not physically plausible - so retry once before
             //degrading to the 40% kick (a failed READ_FAN_POWER used to look identical to a
             //genuine 0% and kicked a perfectly good fan).
-            bool suspiciousRead = knownDuty < 0 && reportedDuty == 0 && ReadHeldFanRpm() != null;
+            bool suspiciousRead = knownDuty < 0 && reportedDuty == 0 && ReadHeldFanRpm(channel) != null;
             if (suspiciousRead)
             {
                 reportedDuty = commander.ReadFanPower(channel);
@@ -2239,32 +2273,33 @@ namespace pCUE
             //A failed read returns 0 and simply degrades to that same kick.
             int startFrom = knownDuty >= 0 ? knownDuty : reportedDuty;
 
-            if (ReadHeldFanRpm() != null && startFrom > 0)
+            if (ReadHeldFanRpm(channel) != null && startFrom > 0)
             {
-                holdConfig.StartDuty = startFrom;
-                holdConfig.StartDutyIsCurrent = true;
+                runConfig.StartDuty = Math.Max(runConfig.MinDuty, Math.Min(runConfig.MaxDuty, startFrom));
+                runConfig.StartDutyIsCurrent = runConfig.StartDuty == startFrom;
             }
             else
             {
                 if (suspiciousRead && reportedDuty == 0)
                     AppLog.Warn("HOLD starting from " + HoldKickStartDuty + "% kick: both duty reads returned 0 " +
                                 "while the fan was turning - check the channel.");
-                holdConfig.StartDuty = HoldKickStartDuty;
-                holdConfig.StartDutyIsCurrent = false;
+                runConfig.StartDuty = Math.Max(runConfig.MinDuty, Math.Min(runConfig.MaxDuty, HoldKickStartDuty));
+                runConfig.StartDutyIsCurrent = false;
             }
 
             holdConfig.TargetRpm = targetRpm;
+            runConfig.TargetRpm = targetRpm;
 
             rpmHold = new FanRpmHoldController(
                 duty =>
                 {
                     //A rejected write must stop the loop rather than let it steer blindly:
                     //the controller catches this and faults out with the reason.
-                    if (!Commander_Pro_Set_Fan_Power(holdChannel, duty))
+                    if (!Commander_Pro_Set_Fan_Power(channel, duty))
                         throw new InvalidOperationException(
-                            "Commander PRO rejected the duty write for fan " + (holdChannel + 1) + ".");
+                            "Commander PRO rejected the duty write for fan " + (channel + 1) + ".");
                 },
-                ReadHeldFanRpm,
+                () => ReadHeldFanRpm(channel),
                 () => Corsair_Commander_Connected);
 
             rpmHold.SnapshotUpdated += Rpm_Hold_SnapshotUpdated;
@@ -2272,7 +2307,7 @@ namespace pCUE
 
             try
             {
-                rpmHold.StartAsync(holdConfig);
+                rpmHold.StartAsync(runConfig);
                 SetHoldStatus("Holding Fan #" + (channel + 1) + " at " + targetRpm.ToString("0") + " RPM...", UpdateInfoBrush);
             }
             catch (Exception ex)
@@ -2310,7 +2345,7 @@ namespace pCUE
             {
                 Dispatcher.BeginInvoke(new Action(delegate
                 {
-                    if (IsRemoteMode) return;
+                    if (IsRemoteMode || !ReferenceEquals(sender, rpmHold)) return;
                     string text = s.Status + "  " + Math.Round(s.FilteredRpm) + " RPM @ " + s.Duty + "%";
                     if (!string.IsNullOrEmpty(s.Note)) text += "  (" + s.Note + ")";
                     SetHoldStatus(text, s.Status == FanHoldStatus.Fault ? UpdateAlertBrush
@@ -2335,8 +2370,7 @@ namespace pCUE
             Hold_Status_Label.ToolTip = text;
         }
 
-        //Stop the loop and forget it. Used on manual Set Speed (the user is taking over), on
-        //Commander disconnect, and on shutdown.
+        //Cancel future writes before a manual command or a replacement hold can take over.
         private void StopRpmHold(string why)
         {
             if (rpmHold == null) return;
@@ -2498,14 +2532,18 @@ namespace pCUE
         private async void Tach_Fan_Assign_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             int sel = ((ComboBox)sender).SelectedIndex;
-            tachAssignedChannel = (sel >= 1 && sel <= 6) ? (sel - 1) : -1;
 
             if (remoteSnapshotApplying) return;
             if (IsRemoteMode)
             {
                 if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
                 ShowRemoteActionResult(await remoteClient.SetTachAssignmentAsync(sel));
+                return;
             }
+
+            int channel = (sel >= 1 && sel <= 6) ? (sel - 1) : -1;
+            if (channel != tachAssignedChannel) StopRpmHold("tachometer assignment changed");
+            tachAssignedChannel = channel;
         }
 
         //Refresh the tach panel from the SAME freshness rule the fan column uses (ReadRpm() returns
