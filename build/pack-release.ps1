@@ -96,7 +96,7 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 # Rebuild into an EMPTY OutputPath so only the files this project currently needs are staged.
 $msbuild = Get-MSBuild
 Write-Host "  msbuild: $msbuild"
-& $msbuild "$proj" /t:Rebuild /p:Configuration=$Configuration "/p:OutputPath=$stage" /v:minimal /nologo
+& $msbuild "$proj" /t:Rebuild /p:Configuration=$Configuration "/p:OutputPath=$stage" /m:1 /nr:false /v:minimal /nologo
 if ($LASTEXITCODE -ne 0) { throw "build failed (exit $LASTEXITCODE)" }
 
 $exe = Join-Path $stage 'pCUE.exe'

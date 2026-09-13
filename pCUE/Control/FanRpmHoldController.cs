@@ -85,6 +85,24 @@ namespace pCUE
         /// restore the old "park on the closer duty" behaviour.
         /// </summary>
         public bool DitherEnabled { get; set; } = true;
+
+        public FanHoldConfig CopyValidated()
+        {
+            var copy = (FanHoldConfig)MemberwiseClone();
+            if (!IsPositiveFinite(copy.TargetRpm) || !IsPositiveFinite(copy.RpmTolerance) ||
+                !IsPositiveFinite(copy.CoarseErrorThreshold))
+                throw new ArgumentException("Target, tolerance and coarse threshold must be finite positive RPM values.");
+            if (copy.MinDuty < 0 || copy.MaxDuty > 100 || copy.MinDuty > copy.MaxDuty ||
+                copy.StartDuty < copy.MinDuty || copy.StartDuty > copy.MaxDuty)
+                throw new ArgumentException("Duty limits must satisfy 0 <= min <= start <= max <= 100.");
+            if (copy.FineDutyStep < 1 || copy.CoarseDutyStep < copy.FineDutyStep || copy.CoarseDutyStep > 100 ||
+                copy.SampleIntervalMs < 1 || copy.SettleDelayMs < 1 || copy.StabilizationTimeMs < 0 ||
+                copy.TimeoutMs < 0 || copy.RpmFilterWindow < 1 || copy.RpmFilterWindow > 1000 || copy.MaxInvalidRpmSamples < 1)
+                throw new ArgumentException("Invalid hold step, timing or sample-window settings.");
+            return copy;
+        }
+
+        private static bool IsPositiveFinite(double value) => value > 0 && !double.IsInfinity(value);
     }
 
     /// <summary>
@@ -126,6 +144,7 @@ namespace pCUE
         private CancellationTokenSource _cts;
         private Task _loop;
         private int _running;                        // 0/1 guard
+        private readonly object _actuatorLock = new object();
 
         private readonly object _targetLock = new object();
         private double _targetRpm;
@@ -149,27 +168,29 @@ namespace pCUE
         public Task StartAsync(FanHoldConfig config)
         {
             if (config == null) throw new ArgumentNullException(nameof(config));
-            if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
-                throw new InvalidOperationException("The RPM hold is already running.");
-
-            lock (_targetLock) _targetRpm = config.TargetRpm;
-
-            _cts = new CancellationTokenSource();
-            _loop = Task.Run(() => RunAsync(config, _cts.Token));
-            return _loop;
+            var runConfig = config.CopyValidated();
+            lock (_actuatorLock)
+            {
+                if (Interlocked.CompareExchange(ref _running, 1, 0) != 0)
+                    throw new InvalidOperationException("The RPM hold is already running.");
+                lock (_targetLock) _targetRpm = runConfig.TargetRpm;
+                var cts = new CancellationTokenSource();
+                _cts = cts;
+                _loop = Task.Run(() => RunAsync(runConfig, cts.Token));
+                return _loop;
+            }
         }
 
-        /// <summary>Requests a clean stop. Safe to call repeatedly. Never blocks on the loop.</summary>
+        /// <summary>Stops future writes; waits only for any accepted actuator transaction in progress.</summary>
         public void Stop()
         {
-            try { _cts?.Cancel(); }
-            catch (Exception ex) { Debug.WriteLine("pCUE: RPM hold cancel failed: " + ex.Message); }
+            lock (_actuatorLock) { _cts?.Cancel(); }
         }
 
         /// <summary>Changes the setpoint of a running loop without restarting it.</summary>
         public void UpdateTarget(double rpm)
         {
-            if (double.IsNaN(rpm) || rpm < 0) return;
+            if (double.IsNaN(rpm) || double.IsInfinity(rpm) || rpm <= 0) return;
             lock (_targetLock) _targetRpm = rpm;
         }
 
@@ -222,7 +243,7 @@ namespace pCUE
                             cfg.RpmTolerance.ToString("0") + ", duty[" + cfg.MinDuty + ".." + cfg.MaxDuty +
                             "] start=" + duty + "%, coarse=" + cfg.CoarseDutyStep + "% fine=" + cfg.FineDutyStep + "%");
                 SetStatus(FanHoldStatus.Ramping);
-                ApplyDuty(duty);
+                ApplyDuty(duty, ct);
 
                 // The fan is still turning at whatever speed it was doing before this loop began,
                 // which may be nowhere near StartDuty. Give it the same settle time a mid-run
@@ -256,15 +277,22 @@ namespace pCUE
                     // Live retarget: the setpoint changed under us. Any dither bracket and
                     // fine-step reversal history belongs to the OLD target - drop them so the
                     // loop converges on the new one instead of reporting Stable around it.
-                    if (!double.IsNaN(lastSeenTarget) && target != lastSeenTarget && dithering)
+                    if (!double.IsNaN(lastSeenTarget) && target != lastSeenTarget)
                     {
                         dithering = false;
                         ditherOffBandWindows = 0;
                         reversals = 0;
                         lastFineDirection = 0;
                         prevFineStepDuty = -1;
+                        bestDuty = duty;
+                        bestAbsError = double.MaxValue;
+                        samples.Clear();
+                        inToleranceSince = null;
+                        everStable = false;
+                        overall.Restart();
+                        SetStatus(FanHoldStatus.Ramping);
                         AppLog.Info("HOLD retargeted to " + target.ToString("0") +
-                                    " RPM - dither bracket dropped, resuming steps");
+                                    " RPM - previous target history cleared");
                     }
                     lastSeenTarget = target;
 
@@ -277,8 +305,11 @@ namespace pCUE
                         break;
                     }
 
-                    if (raw == null)
+                    if (raw == null || double.IsNaN(raw.Value) || double.IsInfinity(raw.Value) || raw.Value <= 0)
                     {
+                        samples.Clear();
+                        inToleranceSince = null;
+                        SetStatus(everStable ? FanHoldStatus.Correcting : FanHoldStatus.Ramping);
                         invalidCount++;
                         if (invalidCount >= cfg.MaxInvalidRpmSamples)
                         {
@@ -295,7 +326,7 @@ namespace pCUE
                             faulted = true;
                             if (lastGoodDuty > duty)
                             {
-                                ApplyDuty(lastGoodDuty);
+                                ApplyDuty(lastGoodDuty, ct);
                                 duty = lastGoodDuty;
                                 stopReason = "target is below this fan's minimum speed - backed off to " +
                                              duty + "%";
@@ -370,7 +401,7 @@ namespace pCUE
                             int leg = error >= 0 ? ditherHi : ditherLo;
                             if (leg != duty)
                             {
-                                ApplyDuty(leg, quiet: true);
+                                ApplyDuty(leg, ct, quiet: true);
                                 duty = leg;
                             }
 
@@ -461,7 +492,7 @@ namespace pCUE
                             }
 
                             // Dither disabled or degenerate bracket: the original park behaviour.
-                            if (duty != bestDuty) { ApplyDuty(bestDuty); duty = bestDuty; }
+                            if (duty != bestDuty) { ApplyDuty(bestDuty, ct); duty = bestDuty; }
                             everStable = true;
                             SetStatus(FanHoldStatus.Stable);
                             Emit(FanHoldStatus.Stable, raw, filtered, target, duty,
@@ -492,7 +523,7 @@ namespace pCUE
 
                     //Local state follows a SUCCESSFUL write (ApplyDuty throws on rejection), so
                     //a mid-step fault snapshot reports the duty the fan is actually still at.
-                    ApplyDuty(newDuty);
+                    ApplyDuty(newDuty, ct);
                     duty = newDuty;
                     if (!await Delay(cfg.SettleDelayMs, ct)) break;
 
@@ -512,23 +543,31 @@ namespace pCUE
             }
             finally
             {
-                Volatile.Write(ref _running, 0);
                 if (faulted) AppLog.Error("HOLD fault: " + stopReason + " (duty left at " + duty + "%)");
                 else AppLog.Info("HOLD stopped: " + stopReason + " (duty left at " + duty + "%)");
                 SetStatus(faulted ? FanHoldStatus.Fault : FanHoldStatus.Stopped);
                 Emit(Status, null, Average(samples), GetTarget(), duty, stopReason);
-                try { _cts?.Dispose(); } catch { }
-                _cts = null;
+                lock (_actuatorLock)
+                {
+                    _cts?.Dispose();
+                    _cts = null;
+                    Volatile.Write(ref _running, 0);
+                }
             }
         }
 
-        private void ApplyDuty(int duty, bool quiet = false)
+        private void ApplyDuty(int duty, CancellationToken ct, bool quiet = false)
         {
             //Actuator FIRST: if the device rejects the write (it throws), CurrentDuty, the log and
             //the local loop state must all keep reporting the duty the hardware actually runs -
             //a fault snapshot that names a duty that was refused is worse than useless.
-            _setDuty(duty);
-            CurrentDuty = duty;
+            lock (_actuatorLock)
+            {
+                ct.ThrowIfCancellationRequested();
+                if (!_canRun()) throw new InvalidOperationException("Commander PRO disconnected");
+                _setDuty(duty);
+                CurrentDuty = duty;
+            }
             if (quiet) AppLog.Debug("HOLD duty -> " + duty + "% (dither leg)");
             else AppLog.Info("HOLD duty -> " + duty + "%");
         }
