@@ -71,6 +71,10 @@ namespace pCUE
         private HidDevice _device;
         private HidStream _stream;
         private Thread _readThread;
+        private BenchTachometerOwnership _ownership;
+        private string _sampleSessionId = Guid.NewGuid().ToString("D");
+        private long _sampleSequence;
+        private long _sampleTimestamp;
 
         private volatile bool _connected;
         private volatile bool _disposing;
@@ -86,6 +90,22 @@ namespace pCUE
         public string Name { get { return "HID Tachometer (VID 1A86 / PID E008)"; } }
         public bool IsConnected { get { return _connected; } }
         public bool BatteryLow { get { return _batteryLow; } }
+        public bool HasExclusiveOwnership { get { return _connected && _ownership != null; } }
+
+        public AcquisitionRpm ReadAcquisitionSample()
+        {
+            lock (_rxLock)
+            {
+                double? age = _latestRpmUtc == DateTime.MinValue ? (double?)null :
+                    (Stopwatch.GetTimestamp() - _sampleTimestamp) * 1000.0 / Stopwatch.Frequency;
+                return new AcquisitionRpm {
+                    value = _connected && age.HasValue && age >= 0 && age <= StalenessMs ? (double?)_latestRpm : null,
+                    source = "external-hid", sampleSessionId = _sampleSessionId, sampleSequence = _sampleSequence,
+                    sampleUtc = _latestRpmUtc == DateTime.MinValue ? null : _latestRpmUtc.ToString("O"),
+                    sampleAgeMs = age, batteryLow = _batteryLow
+                };
+            }
+        }
 
         public event EventHandler<TachoReadingEventArgs> ReadingChanged;
         public event EventHandler<bool> ConnectionChanged;
@@ -165,6 +185,10 @@ namespace pCUE
 
             DisconnectNoLock();
 
+            _ownership = BenchTachometerOwnership.Acquire();
+            try
+            {
+
             HidDevice device = DeviceList.Local.GetHidDevices(VendorId, ProductId, null, null).FirstOrDefault();
             if (device == null)
             {
@@ -198,6 +222,12 @@ namespace pCUE
             Debug.WriteLine("pCUE: tachometer connected.");
             RaiseConnection(true);
             StartReadThread();
+            }
+            catch { DisconnectNoLock(); throw; }
+            finally
+            {
+                if (!_connected) { _ownership?.Dispose(); _ownership = null; }
+            }
         }
 
         private void DisconnectNoLock()
@@ -214,6 +244,9 @@ namespace pCUE
                 _hexList.Clear();
                 _latestRpmUtc = DateTime.MinValue;
                 _latestRpm = 0;
+                _sampleTimestamp = 0;
+                _sampleSequence = 0;
+                _sampleSessionId = Guid.NewGuid().ToString("D");
             }
             _batteryLow = false;
 
@@ -228,6 +261,8 @@ namespace pCUE
             {
                 try { thread.Join(1000); } catch { }
             }
+            _ownership?.Dispose();
+            _ownership = null;
 
             if (wasConnected)
             {
@@ -269,22 +304,27 @@ namespace pCUE
                 }
                 catch (Exception ex)
                 {
-                    if (_running) { Debug.WriteLine("pCUE: tach HID read failed: " + ex.Message); HandleDeviceLost(); }
+                    if (_running) { Debug.WriteLine("pCUE: tach HID read failed: " + ex.Message); HandleDeviceLost(stream); }
                     break;
                 }
 
                 if (n <= 0) continue;
                 if (!firstReportLogged) { firstReportLogged = true; LogFirstReport(buffer, n); }
-                ProcessReport(buffer, n);
+                lock (_rxLock)
+                {
+                    // A closed reader must not publish into the replacement connection's session.
+                    if (!ReferenceEquals(stream, _stream) || !_connected) break;
+                    ProcessReport(buffer, n);
+                }
             }
         }
 
-        private void HandleDeviceLost()
+        private void HandleDeviceLost(HidStream failedStream)
         {
             // Keep auto-reconnect armed; the DeviceList.Changed handler re-opens on re-insertion.
             lock (_stateLock)
             {
-                if (_disposing) return;
+                if (_disposing || !ReferenceEquals(failedStream, _stream)) return;
                 DisconnectNoLock();
             }
         }
@@ -422,6 +462,8 @@ namespace pCUE
                 {
                     _latestRpm = rounded;
                     _latestRpmUtc = DateTime.UtcNow;
+                    _sampleTimestamp = Stopwatch.GetTimestamp();
+                    _sampleSequence++;
                 }
 
                 EventHandler<TachoReadingEventArgs> handler = ReadingChanged;

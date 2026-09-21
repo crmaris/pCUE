@@ -4,6 +4,51 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-22 — acoustic-acquisition extension, offline candidate 1.5.8
+
+Isolated branch `codex/noise-acquisition` adds an independent, lease-controlled PWM acquisition
+actor. `Control/PwmAcquisitionController.cs` accepts explicit per-DUT limits, approaches a fixed
+whole-percent duty or RPM target, then freezes duty while continuing fresh external tachometer,
+overspeed, drift, connection and ownership checks. Ordinary RPM hold and its existing lost-signal
+policy are unchanged. Commander writes and connection changes are fenced at the device layer
+during a lease; ordinary UI/API controls refuse ownership conflicts.
+
+`GET /acquisition/status` and `POST /acquisition/{lease,renew,target,freeze,output-off,release,confirm-ambient}`
+implement protocol version 1 shared with Noise Auto Testing. Every route requires the configured
+`X-pCUE-Token` header, including loopback; acquisition never accepts URL credentials. Mutation
+bodies are bounded JSON. A lease has a UUID operation, channel 1–6, owner, 10–120 s duration and
+validated limits; identical lease retries return the same private token. Status never contains
+that token. Mutations require the lease token and operation ID. Expiry, cancellation and faults
+attempt duty zero; failed readback leaves an explicit physical-attention fault.
+
+The tachometer holds `Global\Cybenetics.BenchTachometer.1A86_E008` for its complete HID connection
+on a dedicated owner thread, for both ordinary and acquisition use. Acquisition requires the
+explicitly assigned external tach channel, current sample session/sequence and monotonic freshness;
+it never falls back to the Commander tach. Both applications must ship this ownership extension
+before relying on cross-application exclusion.
+
+**PWM zero is not electrical power-off.** `confirmedOutputOff` remains false. Ambient readiness
+requires a lease-scoped recorded operator name/reason after confirmed duty zero and distinct,
+fresh stable zero-RPM samples. The confirmation is invalidated by output or sample-session changes.
+This supports attended physical-off setup only; unattended ambient-to-product switching still
+requires a separately verified physical power gate. No physical hardware was opened, actuated,
+reset or deployed during this implementation. Live safety/measurement acceptance remains pending.
+
+Offline validation: Debug build, 14 existing tach/ordinary-hold checks, 26 acquisition protection
+checks using fake hardware and clock, expanded loopback HTTP auth/method/body checks, and both WPF
+layout windows passed. Existing HidSharp obsolete warnings remain. Validation ran inside the
+owner's safe-dotnet mutex via a temporary MSBuild target invoking the repository's native Visual
+Studio MSBuild pipeline. The final gate log is retained at `.worktrees/noise-acquisition/artifacts/validation/acquisition-final.log`. Post-review regressions cover expiry crossing a blocking read, failed release/output-off acknowledgements, and worker retirement before hardware disposal. Release packaging also passed with the required installer:
+
+- `.worktrees/noise-acquisition/artifacts/pCUE_1.5.8_setup.exe` — SHA-256
+  `798EDC052AA22855E3F2BE21930CF23781454618FFF5D6E6E08E64734C6F3CA9`
+- `.worktrees/noise-acquisition/artifacts/pCUE_1.5.8_portable.zip` — SHA-256
+  `2B60BD52F9B6861C5303C51EA7B1121AB860B76FAEBCD742FDF35D55958274B7`
+
+Artifacts are unsigned, retained for candidate review and not installed on Sound-PC. The parent
+Noise Auto Testing task coordinates publication; this entry does not claim a GitHub release or
+updater promotion. Temporary validation orchestration files were removed after completion.
+
 ## What it does
 Reads the Commander PRO over USB-HID and shows per-fan RPM (Current/Min/Max/Avg) plus CPU
 Temp/MHz/Load; lets the user set fan mode (Auto / 3-pin / 4-pin / Disconnect), fan speed

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Windows;
@@ -36,7 +36,7 @@ namespace pCUE
     /// <summary>
     /// Interaction logic for MainWindow.xaml
     /// </summary>
-    public partial class MainWindow : Window, IRemoteControlTarget
+    public partial class MainWindow : Window, IRemoteControlTarget, IPwmAcquisitionTarget
     {
         //The Commander PRO HID session. All protocol knowledge lives in the device class; this
         //window only orchestrates UI, polling and the hold loop on top of it.
@@ -112,6 +112,11 @@ namespace pCUE
         //on a 3-pin (DC) channel it offers fixed percent only, so pCUE closes that loop itself.
         FanRpmHoldController rpmHold;
         volatile int holdChannel = -1;   // -1 = None; 0..5 = Fan #1..#6
+        PwmAcquisitionController acquisition;
+        readonly int[] acquisitionFanModes = new int[6];
+        bool restoringAcquisitionMode;
+        private bool AcquisitionLeased { get { return acquisition != null && acquisition.IsLeased; } }
+        private const string AcquisitionBusy = "An acoustic acquisition owns this fixture. Cancel or release its lease first.";
 
         //What to open at when the fan is stopped: there is nothing to measure, and nothing to
         //step away from, until it breaks away.
@@ -194,6 +199,10 @@ namespace pCUE
             //External bench tachometer - created here, opened only when the user clicks Connect.
             bench_tach = new HidTachometer();
             bench_tach.ConnectionChanged += Bench_Tach_ConnectionChanged;
+            acquisition = new PwmAcquisitionController(commander, () => bench_tach.ReadAcquisitionSample(),
+                fan => fan >= 1 && fan <= 6 && tachAssignedChannel == fan - 1 &&
+                    Volatile.Read(ref acquisitionFanModes[fan - 1]) == 2 && (rpmHold == null || !rpmHold.IsRunning),
+                () => bench_tach.HasExclusiveOwnership, () => tachAssignedChannel + 1);
             //The live RPM readout is refreshed by Update_Tach_Panel() on the 500 ms UI timer, so
             //the panel and the fan column agree on what "fresh" means.
 
@@ -272,6 +281,7 @@ namespace pCUE
 
             //stop the closed-loop hold before the HID stream goes away
             StopRpmHold("application closing");
+            acquisition?.Dispose();
 
             //stop background fan polling and release the HID stream
             Corsair_Commander_Connected = false;
@@ -498,6 +508,7 @@ namespace pCUE
         //disconnect that fires after repeated poll failures. Idempotent and null-safe.
         private void DisconnectCommanderPro(string statusText, System.Windows.Media.Brush statusBrush)
         {
+            if (AcquisitionLeased) acquisition.RevokeAsync("Commander disconnect requested.").GetAwaiter().GetResult();
             StopRpmHold("Commander disconnected");   //the loop has no actuator without the device
             Corsair_Commander_Connected = false;
             StopFanPolling();   //cancellation only - never waits on the poll task
@@ -596,8 +607,20 @@ namespace pCUE
                 default: type = FanDetectionType.Auto; break;
             }
 
+            if (AcquisitionLeased)
+            {
+                if (!restoringAcquisitionMode)
+                {
+                    restoringAcquisitionMode = true;
+                    try { Fan_Mode_Controls[selected_fan].SelectedIndex = Volatile.Read(ref acquisitionFanModes[selected_fan]); }
+                    finally { restoringAcquisitionMode = false; }
+                    SetStatus(AcquisitionBusy, UpdateAlertBrush);
+                }
+                return;
+            }
             if (selected_fan == holdChannel) StopRpmHold("fan mode changed");
             fanModeWriteOk[selected_fan] = commander.WriteFanDetectionType(selected_fan, type);
+            if (fanModeWriteOk[selected_fan]) Volatile.Write(ref acquisitionFanModes[selected_fan], (int)type);
             if (!fanModeWriteOk[selected_fan])
             {
                 SetStatus("● Fan " + (selected_fan + 1) + ": mode change rejected by device",
@@ -622,6 +645,7 @@ namespace pCUE
 
         private async void Open_Corsair_Commander_Click(object sender, RoutedEventArgs e)
         {
+            if (AcquisitionLeased) { SetStatus(AcquisitionBusy, UpdateAlertBrush); return; }
             if (IsRemoteMode)
             {
                 if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
@@ -1064,6 +1088,7 @@ namespace pCUE
 
         private async void Set_Fan_Speed_Click(object sender, RoutedEventArgs e)
         {
+            if (AcquisitionLeased) { SetStatus(AcquisitionBusy, UpdateAlertBrush); return; }
             if (IsRemoteMode)
             {
                 if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
@@ -1282,8 +1307,24 @@ namespace pCUE
             }));
         }
 
+        public PwmAcquisitionStatus GetAcquisitionStatus() { return acquisition.Status; }
+
+        public async Task<PwmAcquisitionResponse> ExecuteAcquisitionAsync(string action, PwmAcquisitionRequest request)
+        {
+            string refusal = Dispatcher.Invoke(new Func<string>(() =>
+            {
+                if (IsRemoteMode) return "Acquisition must target this PC, not a remote proxy.";
+                if (action == "lease" && rpmHold != null && rpmHold.IsRunning)
+                    return "Stop the ordinary RPM hold before acquiring the acoustic fixture.";
+                return null;
+            }));
+            if (refusal != null) return new PwmAcquisitionResponse { ok = false, error = refusal, status = acquisition.Status };
+            return await acquisition.ExecuteAsync(action, request).ConfigureAwait(false);
+        }
+
         public string SetFanDuty(int fan, int duty)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             if (!TryChannel(fan, out int channel, out string error)) return error;
             if (duty < 0 || duty > 100) return "value must be 0-100 (percent).";
             if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
@@ -1297,6 +1338,7 @@ namespace pCUE
 
         public string SetFanRpm(int fan, int rpm)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             if (!TryChannel(fan, out int channel, out string error)) return error;
             if (rpm <= 100 || rpm > 3500) return "value must be 101-3500 RPM (<=100 would be read as a percent).";
             if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
@@ -1310,6 +1352,7 @@ namespace pCUE
 
         public string SetFanMode(int fan, string mode)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             if (!TryChannel(fan, out int channel, out string error)) return error;
             if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
 
@@ -1332,6 +1375,7 @@ namespace pCUE
 
         public string ApplyFanSetpoints(int[] values)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             if (values == null || values.Length != 6) return "values must contain exactly six setpoints.";
             for (int i = 0; i < values.Length; i++)
                 if (values[i] < 0 || values[i] > 3500)
@@ -1364,6 +1408,7 @@ namespace pCUE
 
         public string StartHold(int fan, int rpm)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             if (!TryChannel(fan, out int channel, out string error)) return error;
             if (rpm <= 0 || rpm > 3500) return "rpm must be 1-3500.";
 
@@ -1383,6 +1428,7 @@ namespace pCUE
 
         public string StopHold()
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote stop"); }));
             return null;
         }
@@ -1532,6 +1578,7 @@ namespace pCUE
 
         public string SetCommanderOpen(bool open)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             string result = null;
             Dispatcher.Invoke(new Action(delegate
             {
@@ -1555,6 +1602,7 @@ namespace pCUE
 
         public string SetTachConnected(bool connected)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             string result = null;
             Dispatcher.Invoke(new Action(delegate
             {
@@ -1571,6 +1619,7 @@ namespace pCUE
 
         public string SetTachAssignment(int fan)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             if (fan < 0 || fan > 6) return "fan must be 0 (none) or 1-6.";
             Dispatcher.Invoke(new Action(delegate { Tach_Fan_Assign.SelectedIndex = fan; }));
             return null;
@@ -1602,6 +1651,7 @@ namespace pCUE
 
         public string SetTachoAdjust(bool on)
         {
+            if (AcquisitionLeased) return AcquisitionBusy;
             Dispatcher.Invoke(new Action(delegate { Tacho_Adjust_CheckBox.IsChecked = on; }));
             return null;
         }
@@ -1616,6 +1666,12 @@ namespace pCUE
         private void Target_Mode_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (Remote_Client_Host_Box == null || remoteClient == null) return; //XAML still loading
+            if (AcquisitionLeased && Target_Mode_Combo.SelectedIndex != 0)
+            {
+                Target_Mode_Combo.SelectedIndex = 0;
+                SetStatus(AcquisitionBusy, UpdateAlertBrush);
+                return;
+            }
             ApplyTargetModeUi();
         }
 
@@ -2220,6 +2276,7 @@ namespace pCUE
 
         private void StartRpmHoldCore(int channel, double targetRpm)
         {
+            if (AcquisitionLeased) { SetHoldStatus(AcquisitionBusy, UpdateAlertBrush); return; }
             if (channel < 0 || channel > 5) { SetHoldStatus("Pick a fan first.", UpdateAlertBrush); return; }
             if (!Corsair_Commander_Connected) { SetHoldStatus("Open the Commander PRO first.", UpdateAlertBrush); return; }
 
@@ -2503,6 +2560,7 @@ namespace pCUE
         //Connect / disconnect the external bench tachometer.
         private async void Tach_Connect_Button_Click(object sender, RoutedEventArgs e)
         {
+            if (AcquisitionLeased) { SetHoldStatus(AcquisitionBusy, UpdateAlertBrush); return; }
             if (IsRemoteMode)
             {
                 if (!remoteClient.IsConnected) { SetRemoteClientError("Remote pCUE is not connected."); return; }
@@ -2542,6 +2600,11 @@ namespace pCUE
             }
 
             int channel = (sel >= 1 && sel <= 6) ? (sel - 1) : -1;
+            if (AcquisitionLeased && channel != tachAssignedChannel)
+            {
+                Tach_Fan_Assign.SelectedIndex = tachAssignedChannel + 1;
+                SetHoldStatus(AcquisitionBusy, UpdateAlertBrush); return;
+            }
             if (channel != tachAssignedChannel) StopRpmHold("tachometer assignment changed");
             tachAssignedChannel = channel;
         }

@@ -177,6 +177,12 @@ namespace pCUE
                 string path = (context.Request.Url.AbsolutePath ?? "/").TrimEnd('/');
                 if (path.Length == 0) path = "/";
 
+                if (path.StartsWith("/acquisition/", StringComparison.OrdinalIgnoreCase))
+                {
+                    await HandleAcquisitionAsync(context, path.Substring("/acquisition/".Length).ToLowerInvariant()).ConfigureAwait(false);
+                    return;
+                }
+
                 switch (path.ToLowerInvariant())
                 {
                     case "/":
@@ -387,6 +393,49 @@ namespace pCUE
             }
         }
 
+        private async Task HandleAcquisitionAsync(HttpListenerContext context, string action)
+        {
+            var target = _target as IPwmAcquisitionTarget;
+            if (target == null)
+            { await WriteJsonAsync(context, HttpStatusCode.NotFound, new { ok = false, error = "Acquisition extension unavailable." }); return; }
+            // New acquisition routes never accept credentials in a URL or implicit loopback authority.
+            if (string.IsNullOrWhiteSpace(_token) || !FixedTimeEquals(context.Request.Headers["X-pCUE-Token"], _token))
+            { await WriteJsonAsync(context, HttpStatusCode.Unauthorized, new { ok = false, error = "Configure a server token and send X-pCUE-Token." }); return; }
+            if (action == "status")
+            {
+                if (context.Request.HttpMethod != "GET")
+                { await WriteJsonAsync(context, HttpStatusCode.MethodNotAllowed, new { ok = false, error = "GET required." }); return; }
+                await WriteJsonAsync(context, HttpStatusCode.OK, target.GetAcquisitionStatus()); return;
+            }
+            if (context.Request.HttpMethod != "POST")
+            { await WriteJsonAsync(context, HttpStatusCode.MethodNotAllowed, new { ok = false, error = "POST required." }); return; }
+            if (action != "lease" && action != "renew" && action != "target" && action != "freeze" && action != "output-off" && action != "release" && action != "confirm-ambient")
+            { await WriteJsonAsync(context, HttpStatusCode.NotFound, new { ok = false, error = "Unknown acquisition action." }); return; }
+            string origin = context.Request.Headers["Origin"];
+            if (!string.IsNullOrEmpty(origin) && !string.Equals(origin, context.Request.Url.GetLeftPart(UriPartial.Authority), StringComparison.OrdinalIgnoreCase))
+            { await WriteJsonAsync(context, HttpStatusCode.Forbidden, new { ok = false, error = "Cross-origin acquisition requests are refused." }); return; }
+            PwmAcquisitionRequest request;
+            try
+            {
+                if (!context.Request.HasEntityBody || context.Request.ContentType == null || !context.Request.ContentType.StartsWith("application/json", StringComparison.OrdinalIgnoreCase) ||
+                    context.Request.ContentLength64 > 32768 || context.Request.QueryString.Count != 0)
+                    throw new ArgumentException("A bounded JSON body without query parameters is required.");
+                using (var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8))
+                {
+                    var body = new StringBuilder(); var chunk = new char[4096]; int count;
+                    while ((count = await reader.ReadAsync(chunk, 0, chunk.Length).ConfigureAwait(false)) > 0)
+                    { body.Append(chunk, 0, count); if (body.Length > 32768) throw new ArgumentException("Acquisition body is too large."); }
+                    request = new JavaScriptSerializer { MaxJsonLength = 32768, RecursionLimit = 8 }.Deserialize<PwmAcquisitionRequest>(body.ToString());
+                    if (request == null) throw new ArgumentException("An acquisition request is required.");
+                }
+            }
+            catch (Exception ex) when (ex is ArgumentException || ex is InvalidOperationException)
+            { await WriteJsonAsync(context, HttpStatusCode.BadRequest, new { ok = false, error = "Invalid acquisition request body." }); return; }
+            var result = await target.ExecuteAcquisitionAsync(action, request).ConfigureAwait(false);
+            // A typed rejection remains HTTP 200, so callers distinguish refusal from an uncertain transport failure.
+            await WriteJsonAsync(context, HttpStatusCode.OK, result).ConfigureAwait(false);
+        }
+
         /// <summary>Runs an action that returns null on success or an error string, and replies.</summary>
         private async Task Act(HttpListenerContext context, Func<Dictionary<string, object>, string> action)
         {
@@ -462,6 +511,9 @@ namespace pCUE
                     "GET  /log?tail=200               - recent diagnostic log lines",
                     "GET  /log/level?value=debug      - read or set the log level",
                     "POST /log/clear                  - clear the in-memory log",
+                    "GET  /acquisition/status          - exclusive acoustic fixture status (header token required)",
+                    "POST /acquisition/lease|renew|target|freeze|output-off|release - supervised acoustic control",
+                    "POST /acquisition/confirm-ambient - recorded physical-off operator confirmation after stable zero RPM",
                 },
                 notes = new[]
                 {
