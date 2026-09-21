@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using pCUE;
@@ -34,6 +36,7 @@ namespace pCUE.RemoteProtocolTests
             var target = new FakeTarget();
             using var server = new RemoteControlServer(target, "http://127.0.0.1:" + port + "/", Token);
             server.Start();
+            await CheckAcquisitionProtocolAsync(port, target);
 
             using (var invalid = new PcueRemoteClient())
             {
@@ -117,6 +120,29 @@ namespace pCUE.RemoteProtocolTests
             }
         }
 
+        private static async Task CheckAcquisitionProtocolAsync(int port, FakeTarget target)
+        {
+            using (var http = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:" + port), Timeout = TimeSpan.FromSeconds(5) })
+            {
+                Assert((await http.GetAsync("/acquisition/status?token=" + Token)).StatusCode == HttpStatusCode.Unauthorized, "acquisition rejects URL token");
+                http.DefaultRequestHeaders.Add("X-pCUE-Token", Token);
+                var status = await http.GetAsync("/acquisition/status");
+                Assert(status.IsSuccessStatusCode && (await status.Content.ReadAsStringAsync()).Contains("\"backend\":\"pCUE\""), "acquisition status round trip");
+                Assert((await http.GetAsync("/acquisition/target")).StatusCode == HttpStatusCode.MethodNotAllowed, "acquisition target requires POST");
+                Assert((await http.PostAsync("/acquisition/target", new StringContent("{}"))).StatusCode == HttpStatusCode.BadRequest, "acquisition requires JSON");
+                Assert((await http.PostAsync("/acquisition/target", new StringContent("{", Encoding.UTF8, "application/json"))).StatusCode == HttpStatusCode.BadRequest, "acquisition rejects malformed JSON");
+                Assert((await http.PostAsync("/acquisition/target?setpoint=99", new StringContent("{}", Encoding.UTF8, "application/json"))).StatusCode == HttpStatusCode.BadRequest, "acquisition rejects query mutations");
+                http.DefaultRequestHeaders.Add("Origin", "https://unrelated.invalid");
+                Assert((await http.PostAsync("/acquisition/target", new StringContent("{}", Encoding.UTF8, "application/json"))).StatusCode == HttpStatusCode.Forbidden, "acquisition refuses cross-origin mutation");
+                http.DefaultRequestHeaders.Remove("Origin");
+                Assert(target.AcquisitionCalls == 0, "invalid requests must not reach fixture");
+                var response = await http.PostAsync("/acquisition/target", new StringContent("{\"operationId\":\"offline-test\",\"leaseToken\":\"private-lease\",\"setpoint\":25}", Encoding.UTF8, "application/json"));
+                string body = await response.Content.ReadAsStringAsync();
+                Assert(response.IsSuccessStatusCode && body.Contains("\"ok\":false") && !body.Contains("private-lease"), "typed fixture refusal keeps token out of response");
+                Assert(target.AcquisitionCalls == 1 && target.AcquisitionRequest.setpoint == 25 && target.AcquisitionAction == "target", "typed acquisition body round trip");
+            }
+        }
+
         private static async Task Ok(Task<PcueApiActionResponse> task)
         {
             PcueApiActionResponse result = await task;
@@ -149,8 +175,17 @@ namespace pCUE.RemoteProtocolTests
             return port;
         }
 
-        private sealed class FakeTarget : IRemoteControlTarget
+        private sealed class FakeTarget : IRemoteControlTarget, IPwmAcquisitionTarget
         {
+            public int AcquisitionCalls;
+            public string AcquisitionAction;
+            public PwmAcquisitionRequest AcquisitionRequest;
+            public PwmAcquisitionStatus GetAcquisitionStatus() { return new PwmAcquisitionStatus { phase = "Idle" }; }
+            public Task<PwmAcquisitionResponse> ExecuteAcquisitionAsync(string action, PwmAcquisitionRequest request)
+            {
+                AcquisitionCalls++; AcquisitionAction = action; AcquisitionRequest = request;
+                return Task.FromResult(new PwmAcquisitionResponse { ok = false, status = GetAcquisitionStatus(), error = "Offline fixture refusal." });
+            }
             public int ProtocolVersion { get; set; } = PcueRemoteClient.MinimumProtocolVersion;
             public string FanMode { get; private set; }
             public int[] Setpoints { get; private set; } = new int[6];

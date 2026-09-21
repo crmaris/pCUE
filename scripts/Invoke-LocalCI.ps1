@@ -66,6 +66,12 @@ Step 'Tachometer and RPM hold regression tests (no hardware)' {
     & (Join-Path $root 'tests\RpmHoldTests\bin\Debug\pCUE.RpmHoldTests.exe')
 }
 
+Step 'Acquisition protection regression tests (fake hardware)' {
+    & $msbuild (Join-Path $root 'tests\AcquisitionTests\AcquisitionTests.csproj') /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo
+    if ($LASTEXITCODE -ne 0) { return }
+    & (Join-Path $root 'tests\AcquisitionTests\bin\Debug\pCUE.AcquisitionTests.exe')
+}
+
 Step 'Remote protocol integration' {
     $testProject = Join-Path $root 'tests\RemoteProtocolTests\RemoteProtocolTests.csproj'
     & $msbuild $testProject /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo

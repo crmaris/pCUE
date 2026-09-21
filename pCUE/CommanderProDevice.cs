@@ -32,7 +32,7 @@ namespace pCUE
     /// A null <see cref="_stream"/> makes any in-flight call bail out; closing the stream
     /// interrupts a blocking transfer (timeouts are set at open).
     /// </summary>
-    public sealed class CommanderProDevice
+    public sealed class CommanderProDevice : IPwmAcquisitionHardware
     {
         public const int FanChannels = 6;
         private const int VendorId = 0x1b1c;   // Corsair
@@ -45,6 +45,7 @@ namespace pCUE
 
         private HidSharp.HidDevice _device;
         private HidSharp.HidStream _stream;
+        private object _acquisitionOwner;
 
         // Duty pCUE last commanded per channel this session, -1 when none. The RPM hold starts
         // from this rather than a fixed kick percentage. It is only updated on a write the device
@@ -69,6 +70,7 @@ namespace pCUE
         {
             lock (_ioLock)
             {
+                if (_acquisitionOwner != null) throw new InvalidOperationException("Commander is owned by an acoustic acquisition.");
                 if (IsConnected) return;
 
                 HidSharp.HidDevice device;
@@ -104,6 +106,7 @@ namespace pCUE
             HidSharp.HidStream local;
             lock (_ioLock)
             {
+                if (_acquisitionOwner != null) throw new InvalidOperationException("Release acoustic acquisition before disconnecting the Commander.");
                 IsConnected = false;
                 local = _stream;
                 _stream = null;
@@ -200,6 +203,14 @@ namespace pCUE
         {
             lock (_ioLock)
             {
+                if (_acquisitionOwner != null) return false;
+                return WriteFanPowerNoLock(channel, percent);
+            }
+        }
+
+        private bool WriteFanPowerNoLock(int channel, int percent)
+        {
+                if (channel < 0 || channel >= FanChannels || percent < 0 || percent > 100) return false;
                 if (_stream == null) return false;
 
                 ClearOut();
@@ -212,13 +223,13 @@ namespace pCUE
                 bool ok = LogExchange("WRITE_FAN_POWER fan=" + (channel + 1) + " duty=" + percent + "%", 4);
                 if (ok && channel >= 0 && channel < FanChannels) _lastCommandedDuty[channel] = percent;
                 return ok;
-            }
         }
 
         public bool WriteFanSpeed(int channel, int rpm)
         {
             lock (_ioLock)
             {
+                if (_acquisitionOwner != null) return false;
                 if (_stream == null) return false;
 
                 ClearOut();
@@ -237,6 +248,7 @@ namespace pCUE
         {
             lock (_ioLock)
             {
+                if (_acquisitionOwner != null) return false;
                 if (_stream == null) return false;
 
                 ClearOut();
@@ -253,6 +265,41 @@ namespace pCUE
         }
 
         // ---------------------------------------------------------------- internals
+
+        public bool TryAcquireAcquisition(object owner)
+        {
+            if (owner == null) throw new ArgumentNullException(nameof(owner));
+            lock (_ioLock)
+            {
+                if (!IsConnected || _stream == null || (_acquisitionOwner != null && !ReferenceEquals(_acquisitionOwner, owner))) return false;
+                _acquisitionOwner = owner; return true;
+            }
+        }
+        public void ReleaseAcquisition(object owner)
+        {
+            lock (_ioLock) { if (ReferenceEquals(_acquisitionOwner, owner)) _acquisitionOwner = null; }
+        }
+        public bool WriteAcquisitionPower(object owner, int channel, int duty)
+        {
+            lock (_ioLock)
+            {
+                if (!ReferenceEquals(_acquisitionOwner, owner) || owner == null) return false;
+                return WriteFanPowerNoLock(channel, duty);
+            }
+        }
+        public int? ReadAcquisitionPower(int channel)
+        {
+            lock (_ioLock)
+            {
+                if (_stream == null || channel < 0 || channel >= FanChannels) return null;
+                ClearOut(); Array.Clear(_in, 0, _in.Length);
+                _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_POWER; _out[2] = (byte)channel;
+                _stream.Write(_out);
+                int read = _stream.Read(_in);
+                if (read < 3 || _in[1] != CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK || _in[2] > 100) return null;
+                return _in[2];
+            }
+        }
 
         private void ClearOut()
         {

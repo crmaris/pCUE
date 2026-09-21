@@ -19,6 +19,8 @@
     <Compile Include="Program.cs" />
     <Compile Include="..\..\pCUE\Control\FanRpmHoldController.cs" Link="FanRpmHoldController.cs" />
     <Compile Include="..\..\pCUE\Tachometer\HidTachometer.cs" Link="HidTachometer.cs" />
+    <Compile Include="..\..\pCUE\Tachometer\BenchTachometerOwnership.cs" Link="BenchTachometerOwnership.cs" />
+    <Compile Include="..\..\pCUE\Control\PwmAcquisitionModels.cs" Link="PwmAcquisitionModels.cs" />
     <Compile Include="..\..\pCUE\Diagnostics\AppLog.cs" Link="AppLog.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
