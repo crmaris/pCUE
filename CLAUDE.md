@@ -4,7 +4,7 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
-## 2026-09-22 — acoustic-acquisition extension, offline candidate 1.5.8
+## 2026-09-22 — acoustic-acquisition extension, published offline prerelease 1.5.8
 
 Isolated branch `codex/noise-acquisition` adds an independent, lease-controlled PWM acquisition
 actor. `Control/PwmAcquisitionController.cs` accepts explicit per-DUT limits, approaches a fixed
@@ -38,16 +38,19 @@ Offline validation: Debug build, 14 existing tach/ordinary-hold checks, 26 acqui
 checks using fake hardware and clock, expanded loopback HTTP auth/method/body checks, and both WPF
 layout windows passed. Existing HidSharp obsolete warnings remain. Validation ran inside the
 owner's safe-dotnet mutex via a temporary MSBuild target invoking the repository's native Visual
-Studio MSBuild pipeline. The final gate log is retained at `.worktrees/noise-acquisition/artifacts/validation/acquisition-final.log`. Post-review regressions cover expiry crossing a blocking read, failed release/output-off acknowledgements, and worker retirement before hardware disposal. Release packaging also passed with the required installer:
+Studio MSBuild pipeline. The final gate log is retained at `artifacts/validation/acquisition-1.5.8/acquisition-final.log`. Post-review regressions cover expiry crossing a blocking read, failed release/output-off acknowledgements, and worker retirement before hardware disposal. Release packaging also passed with the required installer:
 
-- `.worktrees/noise-acquisition/artifacts/pCUE_1.5.8_setup.exe` — SHA-256
+- `artifacts/pCUE_1.5.8_setup.exe` — SHA-256
   `798EDC052AA22855E3F2BE21930CF23781454618FFF5D6E6E08E64734C6F3CA9`
-- `.worktrees/noise-acquisition/artifacts/pCUE_1.5.8_portable.zip` — SHA-256
+- `artifacts/pCUE_1.5.8_portable.zip` — SHA-256
   `2B60BD52F9B6861C5303C51EA7B1121AB860B76FAEBCD742FDF35D55958274B7`
 
-Artifacts are unsigned, retained for candidate review and not installed on Sound-PC. The parent
-Noise Auto Testing task coordinates publication; this entry does not claim a GitHub release or
-updater promotion. Temporary validation orchestration files were removed after completion.
+Artifacts are unsigned and not installed on Sound-PC. Public PR #9 merged as `8d15a1f` on master;
+https://github.com/crmaris/pCUE/releases/tag/v1.5.8 is explicitly a prerelease with physical acceptance pending.
+GitHub asset digests match the hashes above, and the merged source tree matches the validated build.
+Compact release evidence: `artifacts/validation/acquisition-1.5.8/release-verification.json`.
+Repository visibility was already public and remains so. The automatic updater feed is unchanged.
+Temporary validation orchestration files and the completed isolated worktree are removed after publication.
 
 ## What it does
 Reads the Commander PRO over USB-HID and shows per-fan RPM (Current/Min/Max/Avg) plus CPU
