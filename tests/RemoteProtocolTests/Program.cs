@@ -128,6 +128,11 @@ namespace pCUE.RemoteProtocolTests
                 http.DefaultRequestHeaders.Add("X-pCUE-Token", Token);
                 var status = await http.GetAsync("/acquisition/status");
                 Assert(status.IsSuccessStatusCode && (await status.Content.ReadAsStringAsync()).Contains("\"backend\":\"pCUE\""), "acquisition status round trip");
+                var channelStatus = await http.GetAsync("/acquisition/status?channel=4");
+                Assert(channelStatus.IsSuccessStatusCode && (await channelStatus.Content.ReadAsStringAsync()).Contains("\"channel\":4"), "channel-scoped acquisition preflight");
+                Assert((await http.GetAsync("/acquisition/status?channel=7")).StatusCode == HttpStatusCode.BadRequest, "invalid preflight channel refused");
+                Assert((await http.GetAsync("/acquisition/status?channel=1&channel=2")).StatusCode == HttpStatusCode.BadRequest, "duplicate preflight channels refused");
+                Assert((await http.GetAsync("/acquisition/status?mode=pwm")).StatusCode == HttpStatusCode.BadRequest, "unknown preflight parameters refused");
                 Assert((await http.GetAsync("/acquisition/target")).StatusCode == HttpStatusCode.MethodNotAllowed, "acquisition target requires POST");
                 Assert((await http.PostAsync("/acquisition/target", new StringContent("{}"))).StatusCode == HttpStatusCode.BadRequest, "acquisition requires JSON");
                 Assert((await http.PostAsync("/acquisition/target", new StringContent("{", Encoding.UTF8, "application/json"))).StatusCode == HttpStatusCode.BadRequest, "acquisition rejects malformed JSON");
@@ -140,6 +145,9 @@ namespace pCUE.RemoteProtocolTests
                 string body = await response.Content.ReadAsStringAsync();
                 Assert(response.IsSuccessStatusCode && body.Contains("\"ok\":false") && !body.Contains("private-lease"), "typed fixture refusal keeps token out of response");
                 Assert(target.AcquisitionCalls == 1 && target.AcquisitionRequest.setpoint == 25 && target.AcquisitionAction == "target", "typed acquisition body round trip");
+                await http.PostAsync("/acquisition/lease", new StringContent("{\"operationId\":\"offline-test\",\"driveMode\":\"dc-percent\",\"channel\":2}", Encoding.UTF8, "application/json"));
+                Assert(target.AcquisitionCalls == 2 && target.AcquisitionRequest.driveMode == "dc-percent" &&
+                    target.AcquisitionAction == "lease", "three-pin drive mode survives the HTTP boundary");
             }
         }
 
@@ -181,6 +189,7 @@ namespace pCUE.RemoteProtocolTests
             public string AcquisitionAction;
             public PwmAcquisitionRequest AcquisitionRequest;
             public PwmAcquisitionStatus GetAcquisitionStatus() { return new PwmAcquisitionStatus { phase = "Idle" }; }
+            public Task<PwmAcquisitionStatus> ReadAcquisitionStatusAsync(int channel) { return Task.FromResult(new PwmAcquisitionStatus { phase = "Idle", channel = channel, driveMode = "pwm" }); }
             public Task<PwmAcquisitionResponse> ExecuteAcquisitionAsync(string action, PwmAcquisitionRequest request)
             {
                 AcquisitionCalls++; AcquisitionAction = action; AcquisitionRequest = request;

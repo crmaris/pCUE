@@ -46,6 +46,8 @@ namespace pCUE
         private HidSharp.HidDevice _device;
         private HidSharp.HidStream _stream;
         private object _acquisitionOwner;
+        private string _acquisitionSampleSession = Guid.NewGuid().ToString("D");
+        private readonly long[] _acquisitionSampleSequences = new long[FanChannels];
 
         // Duty pCUE last commanded per channel this session, -1 when none. The RPM hold starts
         // from this rather than a fixed kick percentage. It is only updated on a write the device
@@ -94,6 +96,8 @@ namespace pCUE
 
                 _device = device;
                 _stream = stream;
+                _acquisitionSampleSession = Guid.NewGuid().ToString("D");
+                Array.Clear(_acquisitionSampleSequences, 0, _acquisitionSampleSequences.Length);
                 IsConnected = true;
 
                 FirmwareVersion = ReadFirmwareVersionNoLock();
@@ -110,6 +114,8 @@ namespace pCUE
                 IsConnected = false;
                 local = _stream;
                 _stream = null;
+                _acquisitionSampleSession = Guid.NewGuid().ToString("D");
+                Array.Clear(_acquisitionSampleSequences, 0, _acquisitionSampleSequences.Length);
                 _device = null;
             }
             if (local == null) return;
@@ -279,11 +285,15 @@ namespace pCUE
         {
             lock (_ioLock) { if (ReferenceEquals(_acquisitionOwner, owner)) _acquisitionOwner = null; }
         }
-        public bool WriteAcquisitionPower(object owner, int channel, int duty)
+        public bool WriteAcquisitionPower(object owner, int channel, int duty, string expectedDriveMode, Func<bool> writeAllowed)
         {
             lock (_ioLock)
             {
                 if (!ReferenceEquals(_acquisitionOwner, owner) || owner == null) return false;
+                // Serialize mode verification and the write; ordinary mode changes are fenced by ownership.
+                // Zero cleanup must remain possible after mode loss or lease expiry.
+                if (duty != 0 && (expectedDriveMode == null || ReadAcquisitionDriveMode(channel) != expectedDriveMode ||
+                    writeAllowed == null || !writeAllowed())) return false;
                 return WriteFanPowerNoLock(channel, duty);
             }
         }
@@ -298,6 +308,42 @@ namespace pCUE
                 int read = _stream.Read(_in);
                 if (read < 3 || _in[1] != CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK || _in[2] > 100) return null;
                 return _in[2];
+            }
+        }
+
+        public string ReadAcquisitionDriveMode(int channel)
+        {
+            lock (_ioLock)
+            {
+                if (_stream == null || channel < 0 || channel >= FanChannels) return null;
+                ClearOut(); Array.Clear(_in, 0, _in.Length);
+                _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_MASK;
+                _stream.Write(_out);
+                int read = _stream.Read(_in);
+                return CommanderAcquisitionFrames.ReadDriveMode(_in, read, channel);
+            }
+        }
+
+        public AcquisitionRpm ReadAcquisitionRpm(int channel)
+        {
+            lock (_ioLock)
+            {
+                var sample = new AcquisitionRpm { source = "commander-internal", batteryLow = null,
+                    sampleSessionId = _acquisitionSampleSession + ":" + channel,
+                    sampleSequence = channel >= 0 && channel < FanChannels ? _acquisitionSampleSequences[channel] : 0 };
+                if (_stream == null || channel < 0 || channel >= FanChannels) return sample;
+                ClearOut(); Array.Clear(_in, 0, _in.Length);
+                _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_SPEED;
+                _out[2] = (byte)channel;
+                _stream.Write(_out);
+                int read = _stream.Read(_in);
+                int rpm;
+                if (!CommanderAcquisitionFrames.TryReadRpm(_in, read, out rpm)) return sample;
+                sample.value = rpm;
+                sample.sampleSequence = ++_acquisitionSampleSequences[channel];
+                sample.sampleUtc = DateTime.UtcNow.ToString("O");
+                sample.sampleAgeMs = 0;
+                return sample;
             }
         }
 

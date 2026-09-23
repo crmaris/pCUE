@@ -405,7 +405,13 @@ namespace pCUE
             {
                 if (context.Request.HttpMethod != "GET")
                 { await WriteJsonAsync(context, HttpStatusCode.MethodNotAllowed, new { ok = false, error = "GET required." }); return; }
-                await WriteJsonAsync(context, HttpStatusCode.OK, target.GetAcquisitionStatus()); return;
+                var query = context.Request.QueryString;
+                if (query.Count == 0) { await WriteJsonAsync(context, HttpStatusCode.OK, target.GetAcquisitionStatus()); return; }
+                int selectedChannel;
+                if (query.Count != 1 || query.AllKeys[0] != "channel" || query.GetValues("channel").Length != 1 ||
+                    !int.TryParse(query["channel"], out selectedChannel) || selectedChannel < 1 || selectedChannel > 6)
+                { await WriteJsonAsync(context, HttpStatusCode.BadRequest, new { ok = false, error = "Only one channel from 1 to 6 is accepted." }); return; }
+                await WriteJsonAsync(context, HttpStatusCode.OK, await target.ReadAcquisitionStatusAsync(selectedChannel)); return;
             }
             if (context.Request.HttpMethod != "POST")
             { await WriteJsonAsync(context, HttpStatusCode.MethodNotAllowed, new { ok = false, error = "POST required." }); return; }
