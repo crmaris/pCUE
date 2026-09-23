@@ -200,9 +200,14 @@ namespace pCUE
             bench_tach = new HidTachometer();
             bench_tach.ConnectionChanged += Bench_Tach_ConnectionChanged;
             acquisition = new PwmAcquisitionController(commander, () => bench_tach.ReadAcquisitionSample(),
-                fan => fan >= 1 && fan <= 6 && tachAssignedChannel == fan - 1 &&
-                    Volatile.Read(ref acquisitionFanModes[fan - 1]) == 2 && (rpmHold == null || !rpmHold.IsRunning),
-                () => bench_tach.HasExclusiveOwnership, () => tachAssignedChannel + 1);
+                fan => fan >= 1 && fan <= 6 &&
+                    (Volatile.Read(ref acquisitionFanModes[fan - 1]) == 2 ||
+                        Volatile.Read(ref acquisitionFanModes[fan - 1]) == 1 && tachAssignedChannel == fan - 1) &&
+                    (rpmHold == null || !rpmHold.IsRunning),
+                () => bench_tach.HasExclusiveOwnership, () => tachAssignedChannel + 1,
+                configuredDriveMode: fan => fan < 1 || fan > 6 ? null :
+                    Volatile.Read(ref acquisitionFanModes[fan - 1]) == 1 ? "dc-percent" :
+                    Volatile.Read(ref acquisitionFanModes[fan - 1]) == 2 ? "pwm" : null);
             //The live RPM readout is refreshed by Update_Tach_Panel() on the 500 ms UI timer, so
             //the panel and the fan column agree on what "fresh" means.
 
@@ -1308,6 +1313,7 @@ namespace pCUE
         }
 
         public PwmAcquisitionStatus GetAcquisitionStatus() { return acquisition.Status; }
+        public Task<PwmAcquisitionStatus> ReadAcquisitionStatusAsync(int channel) { return acquisition.ReadStatusAsync(channel); }
 
         public async Task<PwmAcquisitionResponse> ExecuteAcquisitionAsync(string action, PwmAcquisitionRequest request)
         {

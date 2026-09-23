@@ -19,6 +19,7 @@ namespace pCUE
         private readonly Func<int, bool> contextReady;
         private readonly Func<bool> exclusiveTach;
         private readonly Func<int> configuredChannel;
+        private readonly Func<int, string> configuredDriveMode;
         private readonly BlockingCollection<Action> queue = new BlockingCollection<Action>();
         private readonly Thread worker;
         private readonly object hardwareOwner = new object();
@@ -27,6 +28,10 @@ namespace pCUE
         private PwmAcquisitionStatus snapshot;
         private PwmAcquisitionLimits limits;
         private string operationId, owner, token, originalLease, fault, sampleSession;
+        private string driveMode;
+        private AcquisitionRpm lastInternalSample;
+        private int lastInternalChannel;
+        private long lastInternalAt;
         private int channel, leaseSeconds;
         private long renewedAt, approachAt, lastWriteAt, stableAt, zeroAt, lastSequence = -1, zeroSequence = -1;
         private int stableSamples, zeroSamples;
@@ -39,16 +44,36 @@ namespace pCUE
         private readonly double clockFrequency;
 
         public PwmAcquisitionController(IPwmAcquisitionHardware hardware, Func<AcquisitionRpm> readSample,
-            Func<int, bool> contextReady, Func<bool> exclusiveTach, Func<int> configuredChannel = null, Func<long> timestamp = null, double clockFrequency = 0)
+            Func<int, bool> contextReady, Func<bool> exclusiveTach, Func<int> configuredChannel = null, Func<long> timestamp = null, double clockFrequency = 0,
+            Func<int, string> configuredDriveMode = null)
         {
             this.hardware = hardware; this.readSample = readSample; this.contextReady = contextReady; this.exclusiveTach = exclusiveTach;
             this.configuredChannel = configuredChannel ?? (() => channel);
+            this.configuredDriveMode = configuredDriveMode ?? (_ => "pwm");
             this.timestamp = timestamp ?? Stopwatch.GetTimestamp; this.clockFrequency = clockFrequency > 0 ? clockFrequency : Stopwatch.Frequency;
             Publish();
             worker = new Thread(Work) { IsBackground = true, Name = "PWM acoustic acquisition" }; worker.Start();
         }
         public bool IsLeased { get { return active; } }
         public PwmAcquisitionStatus Status { get { return Volatile.Read(ref snapshot); } }
+        public Task<PwmAcquisitionStatus> ReadStatusAsync(int requestedChannel)
+        {
+            if (requestedChannel < 1 || requestedChannel > 6) throw new ArgumentOutOfRangeException(nameof(requestedChannel));
+            var result = new TaskCompletionSource<PwmAcquisitionStatus>(TaskCreationOptions.RunContinuationsAsynchronously);
+            if (disposed) { result.SetException(new ObjectDisposedException(nameof(PwmAcquisitionController))); return result.Task; }
+            try { queue.Add(() => {
+                try {
+                    if (active) { result.SetResult(Status); return; }
+                    string mode = configuredDriveMode(requestedChannel);
+                    if (!hardware.IsConnected || !contextReady(requestedChannel) ||
+                        (mode != "pwm" && mode != "dc-percent") || hardware.ReadAcquisitionDriveMode(requestedChannel - 1) != mode)
+                        mode = null;
+                    result.SetResult(BuildStatus(requestedChannel, mode,
+                        mode == null ? new AcquisitionRpm() : ReadFeedback(mode, requestedChannel)));
+                } catch (Exception ex) { result.SetException(ex); }
+            }); } catch (InvalidOperationException) { result.TrySetException(new ObjectDisposedException(nameof(PwmAcquisitionController))); }
+            return result.Task;
+        }
         private double Milliseconds(long from) { return (timestamp() - from) * 1000.0 / clockFrequency; }
         public Task<PwmAcquisitionResponse> ExecuteAsync(string action, PwmAcquisitionRequest request)
         {
@@ -102,27 +127,33 @@ namespace pCUE
                     request.channel < 1 || request.channel > 6 || request.leaseSeconds < 10 || request.leaseSeconds > 120 || request.limits == null)
                     throw new ArgumentException("A UUID operation, owner, channel, lease duration and explicit DUT limits are required.");
                 request.limits.Validate();
-                var fingerprint = new JavaScriptSerializer().Serialize(new { request.operationId, request.owner, request.channel, request.leaseSeconds, request.limits });
+                string requestedMode = request.driveMode ?? "pwm";
+                if (requestedMode != "pwm" && requestedMode != "dc-percent")
+                    throw new ArgumentException("Drive mode must be pwm (four-pin) or dc-percent (three-pin).");
+                var fingerprint = new JavaScriptSerializer().Serialize(new { request.operationId, request.owner, request.channel, request.leaseSeconds, request.limits, driveMode = requestedMode });
                 if (active)
                 {
                     if (fingerprint == originalLease) return token;
                     throw new InvalidOperationException("The fixture is already leased or the lease parameters changed.");
                 }
                 if (request.operationId == operationId) throw new InvalidOperationException("This operation has ended. Reconcile its retained status.");
-                if (!hardware.IsConnected || !exclusiveTach() || !contextReady(request.channel))
-                    throw new InvalidOperationException("Connected Commander, assigned exclusively owned external tachometer and stopped ordinary hold are required.");
+                if (!hardware.IsConnected || !FeedbackOwned(requestedMode) || !contextReady(request.channel) || configuredDriveMode(request.channel) != requestedMode)
+                    throw new InvalidOperationException("Connected Commander, correct fan mode, exclusive selected feedback and stopped ordinary hold are required.");
                 if (!hardware.TryAcquireAcquisition(hardwareOwner)) throw new InvalidOperationException("Commander control is already owned.");
                 try
                 {
-                    if (!contextReady(request.channel) || hardware.ReadAcquisitionPower(request.channel - 1) != 0)
+                    if (!contextReady(request.channel) || configuredDriveMode(request.channel) != requestedMode ||
+                        hardware.ReadAcquisitionDriveMode(request.channel - 1) != requestedMode)
+                        throw new InvalidOperationException("Explicit channel mode and detected fan type must match the requested drive mode.");
+                    if (hardware.ReadAcquisitionPower(request.channel - 1) != 0)
                         throw new InvalidOperationException("Set the selected fan to confirmed zero duty before acquiring it.");
-                    var sample = readSample();
-                    if (!Fresh(sample, request.limits) || sample.value != 0)
-                        throw new InvalidOperationException("A fresh genuine external zero-RPM reading is required before lease acquisition.");
+                    var sample = ReadFeedback(requestedMode, request.channel);
+                    if (!Fresh(sample, request.limits, requestedMode) || sample.value != 0)
+                        throw new InvalidOperationException("A fresh genuine zero-RPM reading from the selected feedback source is required before lease acquisition.");
                     limits = new JavaScriptSerializer().Deserialize<PwmAcquisitionLimits>(new JavaScriptSerializer().Serialize(request.limits));
                     operationId = request.operationId; owner = request.owner; originalLease = fingerprint;
                     using (var random = RandomNumberGenerator.Create()) { var bytes = new byte[32]; random.GetBytes(bytes); token = BitConverter.ToString(bytes).Replace("-", ""); }
-                    channel = request.channel; leaseSeconds = request.leaseSeconds; renewedAt = timestamp();
+                    channel = request.channel; driveMode = requestedMode; leaseSeconds = request.leaseSeconds; renewedAt = timestamp();
                     sampleSession = sample.sampleSessionId; commanded = 0; active = true; phase = "Off"; fault = null;
                     confirmation = null; targetRpm = null; setpoint = null; frozen = false; kick = false;
                     ResetStability(); zeroSamples = 0; zeroAt = 0; zeroSequence = -1;
@@ -139,8 +170,8 @@ namespace pCUE
                 case "target": SetTarget(request); return null;
                 case "freeze":
                     if (frozen && phase == "Frozen") return null;
-                    var sample = readSample();
-                    if (phase != "Stable" || !Fresh(sample, limits) || sample.value <= 0)
+                    var sample = ReadFeedback(driveMode, channel);
+                    if (phase != "Stable" || !Fresh(sample, limits, driveMode) || sample.value <= 0 || sample.sampleSessionId != sampleSession)
                         throw new InvalidOperationException("Distinct fresh stable RPM samples are required before capture.");
                     frozen = true; if (!targetRpm.HasValue) targetRpm = sample.value; phase = "Frozen"; return null;
                 case "output-off":
@@ -148,8 +179,9 @@ namespace pCUE
                     catch { Terminate("Fault", "Zero duty could not be confirmed; physical fixture attention is required."); throw; }
                     phase = "Off"; targetRpm = null; setpoint = null; frozen = false; ResetStability(); return null;
                 case "confirm-ambient":
+                    var ambientSample = ReadFeedback(driveMode, channel);
                     if (phase != "Off" || commanded != 0 || zeroSamples < 3 || Milliseconds(zeroAt) < limits.stabilityMilliseconds ||
-                        !Fresh(readSample(), limits) || readSample().value != 0)
+                        !Fresh(ambientSample, limits, driveMode) || ambientSample.value != 0 || ambientSample.sampleSessionId != sampleSession)
                         throw new InvalidOperationException("Confirmed zero duty and distinct fresh stable zero-RPM readings are required.");
                     if (string.IsNullOrWhiteSpace(request.operatorName) || request.operatorName.Length > 80 || request.operatorName.Any(char.IsControl) ||
                         string.IsNullOrWhiteSpace(request.reason) || request.reason.Length > 500 || request.reason.Any(char.IsControl))
@@ -184,7 +216,9 @@ namespace pCUE
                 (request.setpoint.HasValue && (!PwmAcquisitionLimits.Finite(request.setpoint.Value) || request.setpoint != Math.Truncate(request.setpoint.Value) || request.setpoint < limits.minimumSetpoint || request.setpoint > limits.maximumSetpoint)))
                 throw new ArgumentException("Choose one RPM target or whole-percent duty within the DUT limits.");
             if (frozen) throw new InvalidOperationException("The output is frozen. End the operating point before retargeting.");
-            if (!Fresh(readSample(), limits)) throw new InvalidOperationException("Fresh external tachometer feedback is required before changing output.");
+            var feedback = ReadFeedback(driveMode, channel);
+            if (!Fresh(feedback, limits, driveMode) || feedback.sampleSessionId != sampleSession)
+                throw new InvalidOperationException("Fresh selected RPM feedback from the leased session is required before changing output.");
             confirmation = null; zeroSamples = 0; targetRpm = request.rpm; setpoint = request.setpoint;
             ResetStability(); approachAt = timestamp(); phase = "Approaching";
             if (commanded == 0)
@@ -200,11 +234,13 @@ namespace pCUE
             Expire(); if (!active) return;
             try
             {
-                if (!hardware.IsConnected || !exclusiveTach() || !contextReady(channel)) throw new InvalidOperationException("Fixture connection, tach assignment or ownership changed.");
+                if (!hardware.IsConnected || !FeedbackOwned(driveMode) || !contextReady(channel) ||
+                    configuredDriveMode(channel) != driveMode || hardware.ReadAcquisitionDriveMode(channel - 1) != driveMode)
+                    throw new InvalidOperationException("Fixture connection, fan drive mode, tach assignment or ownership changed.");
                 var actualDuty = hardware.ReadAcquisitionPower(channel - 1);
                 if (!actualDuty.HasValue || actualDuty != commanded) throw new InvalidOperationException("Commander duty changed or cannot be verified.");
-                var sample = readSample();
-                if (!Fresh(sample, limits) || sample.sampleSessionId != sampleSession) throw new InvalidOperationException("External tachometer data is stale, invalid or belongs to a different connection.");
+                var sample = ReadFeedback(driveMode, channel);
+                if (!Fresh(sample, limits, driveMode) || sample.sampleSessionId != sampleSession) throw new InvalidOperationException("Selected RPM feedback is stale, invalid or belongs to a different connection.");
                 if (sample.value > limits.maximumRpm) throw new InvalidOperationException("RPM exceeded the per-DUT limit.");
                 if (phase == "Off")
                 {
@@ -246,10 +282,32 @@ namespace pCUE
             catch (Exception ex) { if (active) Terminate("Fault", ex is InvalidOperationException ? ex.Message : "Fixture communication failed."); }
         }
         private void ResetStability() { stableSamples = 0; stableAt = 0; stableReference = null; lastSequence = -1; }
-        private static bool Fresh(AcquisitionRpm sample, PwmAcquisitionLimits cfg)
+        private static string FeedbackSource(string mode) { return mode == "pwm" ? "commander-internal" : mode == "dc-percent" ? "external-hid" : null; }
+        private bool FeedbackOwned(string mode) { return mode == "pwm" ? hardware.IsConnected : mode == "dc-percent" && exclusiveTach(); }
+        private AcquisitionRpm ReadFeedback(string mode, int fan)
+        {
+            if (mode != "pwm") return readSample();
+            lastInternalSample = hardware.ReadAcquisitionRpm(fan - 1);
+            lastInternalAt = timestamp(); lastInternalChannel = fan;
+            return lastInternalSample;
+        }
+        private AcquisitionRpm CachedInternalSample(int fan)
+        {
+            var sample = lastInternalChannel == fan ? lastInternalSample : null;
+            if (sample == null) return new AcquisitionRpm { source = "commander-internal" };
+            return new AcquisitionRpm { value = sample.value, source = sample.source, sampleSessionId = sample.sampleSessionId,
+                sampleSequence = sample.sampleSequence, sampleUtc = sample.sampleUtc,
+                sampleAgeMs = sample.sampleAgeMs + Milliseconds(lastInternalAt), batteryLow = sample.batteryLow };
+        }
+        private bool FeedbackStillFresh()
+        {
+            var sample = driveMode == "pwm" ? CachedInternalSample(channel) : readSample();
+            return Fresh(sample, limits, driveMode) && sample.sampleSessionId == sampleSession;
+        }
+        private static bool Fresh(AcquisitionRpm sample, PwmAcquisitionLimits cfg, string mode)
         {
             return sample != null && sample.value.HasValue && PwmAcquisitionLimits.Finite(sample.value.Value) && sample.value >= 0 &&
-                sample.source == "external-hid" && sample.batteryLow == false && !string.IsNullOrWhiteSpace(sample.sampleSessionId) &&
+                sample.source == FeedbackSource(mode) && (mode == "pwm" ? sample.batteryLow != true : sample.batteryLow == false) && !string.IsNullOrWhiteSpace(sample.sampleSessionId) &&
                 sample.sampleSequence.HasValue && sample.sampleSequence >= 0 && sample.sampleAgeMs.HasValue &&
                 PwmAcquisitionLimits.Finite(sample.sampleAgeMs.Value) && sample.sampleAgeMs >= 0 && sample.sampleAgeMs <= cfg.maximumSampleAgeMilliseconds;
         }
@@ -260,14 +318,19 @@ namespace pCUE
             // possible point before energizing; zero-duty cleanup remains allowed after expiry.
             Expire();
             if (!active || disposed) throw new InvalidOperationException("Lease ended before the output write.");
+            if (!contextReady(channel) || !FeedbackOwned(driveMode) || configuredDriveMode(channel) != driveMode)
+                throw new InvalidOperationException("Fixture configuration changed before the output write.");
             confirmation = null; zeroSamples = 0;
-            if (!hardware.WriteAcquisitionPower(hardwareOwner, channel - 1, value)) throw new InvalidOperationException("Commander rejected acquisition duty.");
+            if (!hardware.WriteAcquisitionPower(hardwareOwner, channel - 1, value, driveMode,
+                () => active && !disposed && Milliseconds(renewedAt) < leaseSeconds * 1000 &&
+                    contextReady(channel) && FeedbackOwned(driveMode) && configuredDriveMode(channel) == driveMode && FeedbackStillFresh()))
+                throw new InvalidOperationException("Commander rejected acquisition drive level, lease expired or fan mode changed.");
             commanded = value; lastWriteAt = timestamp();
         }
         private void ForceZero()
         {
             confirmation = null; zeroSamples = 0; zeroAt = 0; zeroSequence = -1;
-            if (!hardware.WriteAcquisitionPower(hardwareOwner, channel - 1, 0) || hardware.ReadAcquisitionPower(channel - 1) != 0)
+            if (!hardware.WriteAcquisitionPower(hardwareOwner, channel - 1, 0, null, null) || hardware.ReadAcquisitionPower(channel - 1) != 0)
             { commanded = null; throw new InvalidOperationException("Zero duty could not be confirmed. Physically inspect the fixture."); }
             commanded = 0; lastWriteAt = timestamp();
         }
@@ -284,15 +347,25 @@ namespace pCUE
         private void Expire() { if (active && Milliseconds(renewedAt) >= leaseSeconds * 1000) Terminate("Expired", "Lease expired; zero duty attempted. Electrical power-off is not verified."); }
         private void Publish()
         {
+            // Terminal acknowledgements retain the leased channel/mode even with no external tach assignment.
+            int statusChannel = operationId != null ? channel : configuredChannel();
+            string statusMode = operationId != null ? driveMode : configuredDriveMode(statusChannel);
             AcquisitionRpm sample;
-            try { sample = readSample() ?? new AcquisitionRpm(); } catch { sample = new AcquisitionRpm(); }
-            bool ambient = active && phase == "Off" && commanded == 0 && limits != null && Fresh(sample, limits) && sample.value == 0 &&
+            try { sample = statusMode == "pwm" ? CachedInternalSample(statusChannel) : readSample() ?? new AcquisitionRpm(); } catch { sample = new AcquisitionRpm(); }
+            Volatile.Write(ref snapshot, BuildStatus(statusChannel, statusMode, sample));
+        }
+        private PwmAcquisitionStatus BuildStatus(int statusChannel, string statusMode, AcquisitionRpm sample)
+        {
+            bool ambient = active && phase == "Off" && commanded == 0 && limits != null && Fresh(sample, limits, driveMode) && sample.value == 0 &&
                 confirmation != null && confirmation.operationId == operationId && confirmation.sampleSessionId == sample.sampleSessionId;
-            Volatile.Write(ref snapshot, new PwmAcquisitionStatus { channel = active ? channel : configuredChannel(), phase = phase, targetRpm = targetRpm, fault = fault,
-                capabilities = new { exclusiveLease = true, sensorFreshness = true, supervisedFreeze = true, confirmedOutputOff = false, exclusiveTachOwnership = exclusiveTach() },
+            return new PwmAcquisitionStatus { channel = statusChannel,
+                driveMode = statusMode, phase = phase, targetRpm = targetRpm, fault = fault,
+                capabilities = new { exclusiveLease = true, sensorFreshness = true, supervisedFreeze = true, confirmedOutputOff = false,
+                    exclusiveTachOwnership = FeedbackOwned(statusMode), exclusiveFeedbackOwnership = FeedbackOwned(statusMode),
+                    feedbackSource = FeedbackSource(statusMode), explicitDriveMode = true },
                 lease = new { active, operationId, owner, expiresUtc = active ? DateTime.UtcNow.AddMilliseconds(Math.Max(0, leaseSeconds * 1000 - Milliseconds(renewedAt))).ToString("O") : null },
                 rpm = sample, actuator = new { commandedValue = commanded, unit = "percent", outputOn = ambient ? (bool?)false : commanded > 0 ? (bool?)true : null, frozen, protectionActive = active, ditherActive = false },
-                ambientConfirmed = ambient, ambientConfirmation = confirmation, observedUtc = DateTime.UtcNow.ToString("O") });
+                ambientConfirmed = ambient, ambientConfirmation = confirmation, observedUtc = DateTime.UtcNow.ToString("O") };
         }
         public void Dispose()
         {

@@ -4,6 +4,66 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-23 — three-pin DC and four-pin internal feedback acquisition, packaged 1.5.9
+
+Branch `codex/commander-dc-acquisition` extends the protected acquisition actor to three-pin DC
+drive percentages as well as four-pin PWM. Offline validation and unsigned 1.5.9 packaging are complete; no hardware calls or deployment were performed.
+
+Lease JSON adds optional `driveMode`: `dc-percent` selects three-pin DC and `pwm` selects
+four-pin PWM. Omission means `pwm`, preserving the previous four-pin-only contract. Mode is
+part of lease idempotency. Status adds `driveMode` and `capabilities.explicitDriveMode:true`;
+the actuator unit remains `percent`. DC percentage is neither measured volts nor PWM duty.
+Idle status reports the explicitly configured mode (null for Auto/disconnected); admission
+also checks the hardware-detected type. A lease never changes channel mode automatically.
+
+Owner correction later on 23 September: three-pin DC uses the assigned, exclusively owned
+external UT372; four-pin PWM uses the Commander's own channel RPM and needs no external tachometer.
+The ordinary pCUE path already supports Commander feedback; the protected path now obtains it
+from validated raw HID polls rather than its UI cache. Internal frames use source
+`commander-internal`, nullable battery status, a connection-and-channel sample session and a
+sequence incremented only by a successful raw poll. Undefined/short/error replies remain null,
+never zero. DC uses `external-hid` with the existing battery and exclusive UT372 requirements.
+
+`GET /acquisition/status?channel=1..6` performs a serialized read-only preflight for a specific
+idle channel: configured mode, validated detected mode and selected RPM feedback. It never changes
+mode or output. During a lease it returns the actual owned channel, irrespective of the query.
+The old query-free GET remains available. Capabilities add `feedbackSource` and
+`exclusiveFeedbackOwnership`; `exclusiveTachOwnership` remains a compatibility alias for exclusive
+ownership of the selected RPM feedback. Mode mismatch/unknown cannot advertise feedback ownership.
+
+Both modes retain bounded software RPM approach, fixed-percent freeze, lease expiry and
+fault-to-zero policy. Physical mode readback
+checks response length/status; mode loss/change revokes ownership. The device serializes a
+fresh mode check and the last lease/configuration check with every nonzero protected write.
+Zero cleanup remains possible after mode loss/expiry. Three-pin RPM targets use software
+percent adjustments, never the Commander's unsupported three-pin fixed-RPM command.
+
+Percent zero still does not prove electrical power-off in either mode. Ambient continues to
+require lease-scoped operator physical-off confirmation and genuine fresh stable zero RPM.
+No current-limit or measured-voltage capability is added. Tests cover DC approach/freeze,
+software RPM targeting, backward compatibility, mode mismatch/unknown, changed lease identity,
+mode changes while frozen and at the final write fence, expiry during mode inspection, and
+the HTTP drive-mode field. The first DC-mode implementation passed through the owner's safe-dotnet wrapper:
+Debug application build (only the four existing HidSharp obsolete warnings), 14/14 ordinary
+RPM/tach tests, 36/36 acquisition checks, loopback remote protocol integration and both WPF
+layout checks. Retained gate log: `artifacts/validation/commander-dc-20260923/offline-validation.log`.
+The final internal-feedback/channel-preflight gate passed through the safe-dotnet wrapper:
+Debug build, 45/45 acquisition tests, 14/14 RPM/tach tests, remote protocol integration,
+CLI parse and both UI layout checks. Only the four existing HidSharp obsolete warnings remain.
+Tests include invalid raw HID replies, genuine zero, source mismatch, stale feedback at the
+last write fence, no external tach for PWM, and no internal fallback for DC. These are offline
+results, not physical fan or electrical-off validation.
+
+The normal Release pack automatically bumped file version to 1.5.9 (assembly version stays
+1.1.0.0) and produced both unsigned packages:
+- `artifacts/pCUE_1.5.9_setup.exe` SHA-256 `0766162F0311A6A733F523B527669BBA2C8867D8A69BC4EC3B32C904E41B1F7A`.
+- `artifacts/pCUE_1.5.9_portable.zip` SHA-256 `1902B13ADDC36CE368E47032837E505EE7AB864C2C53A181848D11E378EA5297`.
+Retained logs: `artifacts/validation/commander-feedback-1.5.9/commander-feedback-validation.log`
+and `commander-feedback-package.log` in the same folder. Temporary orchestration files/logs
+were removed after preserving evidence. No hardware opened; Sound-PC deployment and physical
+three-/four-pin acceptance remain pending. The public updater feed is unchanged. No hosted CI
+fallback or runner changes were used. The Desktop CI handover is absent and no matching Recycle
+Bin item was found; this repository's documented local gates were used.
 ## 2026-09-22 — acoustic-acquisition extension, published offline prerelease 1.5.8
 
 Isolated branch `codex/noise-acquisition` adds an independent, lease-controlled PWM acquisition

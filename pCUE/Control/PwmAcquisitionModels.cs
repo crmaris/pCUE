@@ -4,6 +4,21 @@ using System.Threading.Tasks;
 
 namespace pCUE
 {
+    public static class CommanderAcquisitionFrames
+    {
+        public static bool TryReadRpm(byte[] frame, int count, out int rpm)
+        {
+            rpm = 0;
+            if (frame == null || count < 4 || count > frame.Length || frame[1] != 0) return false;
+            rpm = (frame[2] << 8) + frame[3];
+            return true;
+        }
+        public static string ReadDriveMode(byte[] frame, int count, int channel)
+        {
+            if (frame == null || count < 8 || count > frame.Length || frame[1] != 0 || channel < 0 || channel > 5) return null;
+            return frame[channel + 2] == 1 ? "dc-percent" : frame[channel + 2] == 2 ? "pwm" : null;
+        }
+    }
     // Lowercase properties intentionally match the shared NoiseAutoTesting JSON contract.
     public sealed class PwmAcquisitionLimits
     {
@@ -39,6 +54,8 @@ namespace pCUE
     }
     public sealed class PwmAcquisitionRequest
     {
+        // Omission retains the old four-pin-only contract; three-pin callers must opt in explicitly.
+        public string driveMode { get; set; }
         public string operationId { get; set; }
         public string owner { get; set; }
         public int channel { get; set; }
@@ -74,6 +91,7 @@ namespace pCUE
         public int protocolVersion { get; set; } = 1;
         public string backend { get; set; } = "pCUE";
         public string hardwareMode { get; set; } = "Real";
+        public string driveMode { get; set; }
         public int channel { get; set; }
         public object capabilities { get; set; }
         public object lease { get; set; }
@@ -99,11 +117,14 @@ namespace pCUE
         bool TryAcquireAcquisition(object owner);
         void ReleaseAcquisition(object owner);
         int? ReadAcquisitionPower(int channel);
-        bool WriteAcquisitionPower(object owner, int channel, int duty);
+        string ReadAcquisitionDriveMode(int channel);
+        AcquisitionRpm ReadAcquisitionRpm(int channel);
+        bool WriteAcquisitionPower(object owner, int channel, int duty, string expectedDriveMode, Func<bool> writeAllowed);
     }
     public interface IPwmAcquisitionTarget
     {
         PwmAcquisitionStatus GetAcquisitionStatus();
+        Task<PwmAcquisitionStatus> ReadAcquisitionStatusAsync(int channel);
         Task<PwmAcquisitionResponse> ExecuteAcquisitionAsync(string action, PwmAcquisitionRequest request);
     }
 }
