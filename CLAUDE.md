@@ -21,6 +21,11 @@ freshly-built exes). 45/45 across 4 consecutive runs after the fix. Gate green v
 - `artifacts/pCUE_1.6.1_setup.exe` SHA-256 `318E6BADC6B4C9EEE6192A2AA62C624216F765E1D049967C4AF2EB107296A927`.
 - `artifacts/pCUE_1.6.1_portable.zip` (hash in its `.sha256` sidecar).
 
+Published 2026-09-23: commit `68c7e60` + tag `v1.6.1` pushed to master, full GitHub Release
+[v1.6.1](https://github.com/crmaris/pCUE/releases/tag/v1.6.1) with all 4 assets, and
+`components.json` `apps.pcue` moved to 1.6.1 (`318E6BAD…`, commit `9f097b8`) — the updater now
+offers 1.6.1. Bench hardware acceptance still owed.
+
 ## 2026-09-23 — improvement batch (unreleased, master only)
 
 Offline work only; no hardware calls, no packaging (file version stays 1.6.0), no manifest change.
