@@ -25,6 +25,8 @@ param(
     [switch]$AlsoPng
 )
 $ErrorActionPreference = 'Stop'
+# Windows-only: System.Drawing needs GDI+ / libgdiplus elsewhere.
+if ($Blades -lt 2 -or $Blades -gt 12) { throw "Blades must be 2-12 (got $Blades)." }
 Add-Type -AssemblyName System.Drawing
 
 $sizes = 16, 20, 24, 32, 40, 48, 64, 128, 256

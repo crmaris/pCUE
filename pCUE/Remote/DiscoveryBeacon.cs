@@ -18,6 +18,11 @@ namespace pCUE
     /// version, machine name, the API URL, and whether a token is required. It never contains the
     /// token itself.
     ///
+    /// LAN-TRUST ONLY: replies are unauthenticated and any local process can answer probes too
+    /// (ReuseAddress). Controllers must confirm the URL before sending a token (the in-app client
+    /// and CLI list candidates; auto-use only when exactly one answers). Replies are rate-limited
+    /// per sender so a probe flood cannot turn the beacon into an amplifier.
+    ///
     /// Protocol (UDP, default port 5057):
     ///   probe  -> "PCUE_DISCOVER"      (broadcast or unicast)
     ///   reply  -> {"app":"pCUE","version":"1.3.2","host":"BENCH-PC","url":"http://10.0.0.5:5056/",
@@ -27,6 +32,9 @@ namespace pCUE
     {
         public const int DefaultPort = 5057;
         private const string Probe = "PCUE_DISCOVER";
+        // At most one reply per sender per interval; bursts beyond that are dropped.
+        private const int MinReplyIntervalMs = 1000;
+        private const int MaxTrackedSenders = 256;
 
         private readonly int _port;
         private readonly int _apiPort;
@@ -34,6 +42,9 @@ namespace pCUE
         private UdpClient _udp;
         private CancellationTokenSource _cts;
         private bool _disposed;
+        private readonly System.Collections.Generic.Dictionary<string, long> _lastReplyBySender =
+            new System.Collections.Generic.Dictionary<string, long>(StringComparer.Ordinal);
+        private readonly object _replyGate = new object();
 
         public DiscoveryBeacon(int apiPort, bool requiresToken, int port = DefaultPort)
         {
@@ -88,6 +99,7 @@ namespace pCUE
                 {
                     string text = Encoding.UTF8.GetString(received.Buffer).Trim();
                     if (!text.StartsWith(Probe, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!AllowReply(received.RemoteEndPoint.ToString())) continue;
 
                     //Answer from the address the probe arrived on, so the URL we hand back is the
                     //one the caller can actually reach.
@@ -119,13 +131,30 @@ namespace pCUE
         {
             try
             {
-                using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-                probe.Connect(new IPEndPoint(remote, 9));
-                return ((IPEndPoint)probe.LocalEndPoint).Address.ToString();
+                using (var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+                {
+                    probe.Connect(new IPEndPoint(remote, 9));
+                    return ((IPEndPoint)probe.LocalEndPoint).Address.ToString();
+                }
             }
             catch
             {
                 return Dns.GetHostName();
+            }
+        }
+
+        private bool AllowReply(string sender)
+        {
+            long now = Environment.TickCount;
+            lock (_replyGate)
+            {
+                long last;
+                if (_lastReplyBySender.TryGetValue(sender, out last) && (now - last) < MinReplyIntervalMs)
+                    return false;
+                if (_lastReplyBySender.Count >= MaxTrackedSenders)
+                    _lastReplyBySender.Clear();
+                _lastReplyBySender[sender] = now;
+                return true;
             }
         }
 

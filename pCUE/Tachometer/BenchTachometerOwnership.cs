@@ -46,7 +46,7 @@ namespace pCUE
             if (Interlocked.Exchange(ref disposed, 1) != 0) return;
             release.Set();
             if (Thread.CurrentThread != thread) thread.Join(2000);
-            if (!thread.IsAlive) release.Dispose();
+            try { release.Dispose(); } catch { }
         }
     }
 }

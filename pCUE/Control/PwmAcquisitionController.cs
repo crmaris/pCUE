@@ -130,7 +130,9 @@ namespace pCUE
                 string requestedMode = request.driveMode ?? "pwm";
                 if (requestedMode != "pwm" && requestedMode != "dc-percent")
                     throw new ArgumentException("Drive mode must be pwm (four-pin) or dc-percent (three-pin).");
-                var fingerprint = new JavaScriptSerializer().Serialize(new { request.operationId, request.owner, request.channel, request.leaseSeconds, request.limits, driveMode = requestedMode });
+                // Field-wise fingerprint: identical lease retries return the same private token.
+                // (Property-order/whitespace sensitive JSON serialization would break idempotency.)
+                var fingerprint = Fingerprint(request, requestedMode);
                 if (active)
                 {
                     if (fingerprint == originalLease) return token;
@@ -201,12 +203,29 @@ namespace pCUE
             if (!active || request.operationId != operationId || !TokenMatches(token, request.leaseToken))
                 throw new InvalidOperationException("The lease is absent, expired or owned by another caller.");
         }
+        private static string Fingerprint(PwmAcquisitionRequest request, string requestedMode)
+        {
+            var l = request.limits;
+            return string.Join("|",
+                request.operationId, request.owner, request.channel.ToString(), request.leaseSeconds.ToString(),
+                requestedMode,
+                l.minimumSetpoint.ToString("0"), l.maximumSetpoint.ToString("0"), l.startSetpoint.ToString("0"),
+                l.maximumStep.ToString("0"), l.maximumSlewPerSecond.ToString("0.###"),
+                l.rpmTolerance.ToString("0.###"), l.settleMilliseconds.ToString(), l.stabilityMilliseconds.ToString(),
+                l.maximumSampleAgeMilliseconds.ToString(), l.approachTimeoutSeconds.ToString(),
+                l.maximumRpm.ToString("0.###"),
+                l.kickSetpoint.HasValue ? l.kickSetpoint.Value.ToString("0") : "-",
+                l.kickMilliseconds.ToString());
+        }
         private static bool TokenMatches(string expected, string supplied)
         {
             if (expected == null || supplied == null) return false;
             var left = Encoding.UTF8.GetBytes(expected); var right = Encoding.UTF8.GetBytes(supplied);
+            // Length-constant: always walk the LONGER input so length does not leak via timing.
+            int n = Math.Max(left.Length, right.Length);
             int difference = left.Length ^ right.Length;
-            for (int index = 0; index < left.Length; index++) difference |= left[index] ^ (index < right.Length ? right[index] : 0);
+            for (int index = 0; index < n; index++)
+                difference |= (index < left.Length ? left[index] : 0) ^ (index < right.Length ? right[index] : 0);
             return difference == 0;
         }
         private void SetTarget(PwmAcquisitionRequest request)
@@ -348,7 +367,9 @@ namespace pCUE
         private void Publish()
         {
             // Terminal acknowledgements retain the leased channel/mode even with no external tach assignment.
+            // Before the first lease channel is unset (0) - report 1 rather than an invalid 0.
             int statusChannel = operationId != null ? channel : configuredChannel();
+            if (statusChannel < 1 || statusChannel > 6) statusChannel = 1;
             string statusMode = operationId != null ? driveMode : configuredDriveMode(statusChannel);
             AcquisitionRpm sample;
             try { sample = statusMode == "pwm" ? CachedInternalSample(statusChannel) : readSample() ?? new AcquisitionRpm(); } catch { sample = new AcquisitionRpm(); }
@@ -364,6 +385,7 @@ namespace pCUE
                     exclusiveTachOwnership = FeedbackOwned(statusMode), exclusiveFeedbackOwnership = FeedbackOwned(statusMode),
                     feedbackSource = FeedbackSource(statusMode), explicitDriveMode = true },
                 lease = new { active, operationId, owner, expiresUtc = active ? DateTime.UtcNow.AddMilliseconds(Math.Max(0, leaseSeconds * 1000 - Milliseconds(renewedAt))).ToString("O") : null },
+                // outputOn tri-state: false = ambient-confirmed off, true = driving (>0), null = off-but-unverified or unknown.
                 rpm = sample, actuator = new { commandedValue = commanded, unit = "percent", outputOn = ambient ? (bool?)false : commanded > 0 ? (bool?)true : null, frozen, protectionActive = active, ditherActive = false },
                 ambientConfirmed = ambient, ambientConfirmation = confirmation, observedUtc = DateTime.UtcNow.ToString("O") };
         }
@@ -373,7 +395,10 @@ namespace pCUE
             if (first) { disposed = true; queue.CompleteAdding(); }
             // Commander I/O has bounded driver timeouts. Ownership and streams must not be
             // reused while the final zero-duty action still runs on this thread.
-            if (Thread.CurrentThread != worker) { worker.Join(); if (first) queue.Dispose(); }
+            // Join unless we ARE the worker (self-join would deadlock); the queue handle is
+            // released on the first dispose regardless so a worker-thread dispose cannot leak it.
+            if (Thread.CurrentThread != worker) worker.Join();
+            if (first) { try { queue.Dispose(); } catch { } }
         }
     }
 }

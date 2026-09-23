@@ -60,6 +60,10 @@ namespace pCUE
     ///      launches the installer, because a running app cannot overwrite its own files.
     ///   4. Checking never installs anything by itself.
     ///
+    /// TRUST: rules 1-2 are INTEGRITY, not authenticity. A compromised manifest repo serving a
+    /// matching url+sha256 would be accepted, then launched elevated (pCUE runs as admin) after
+    /// the user's two confirms. There is no Authenticode or out-of-band signature check.
+    ///
     /// Manifest shape (the shared Cybenetics manifest):
     ///   { "apps": { "pcue": { "version": "1.3.0.19", "url": "https://...", "sha256": "...",
     ///                         "notes": "..." } } }
@@ -218,6 +222,8 @@ namespace pCUE
         /// Downloads the installer and verifies its SHA-256. Returns the verified path on disk -
         /// it is NOT executed here. The caller must confirm with the user before launching it.
         /// Returns null (with a message) if anything fails; a mismatched file is deleted.
+        /// Downloads are capped at 64 MB; cancelled/oversized/failed downloads are deleted so no
+        /// partial file is left behind.
         /// </summary>
         public async Task<string> DownloadVerifiedInstallerAsync(AppUpdateInfo info,
             IProgress<string> progress = null,
@@ -231,28 +237,55 @@ namespace pCUE
             if (string.IsNullOrWhiteSpace(info.Sha256))
                 throw new InvalidOperationException("Refusing to download without an expected SHA-256.");
 
+            const long MaxInstallerBytes = 64L * 1024 * 1024;
+
             string dir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "pCUE", "updates");
             Directory.CreateDirectory(dir);
 
-            string fileName = Path.GetFileName(new Uri(info.DownloadUrl).LocalPath);
+            string fileName;
+            try { fileName = Path.GetFileName(new Uri(info.DownloadUrl).LocalPath); }
+            catch { fileName = null; }
+            // Sanitize: URL filenames are attacker-influenced; keep only the leaf name.
+            try { fileName = Path.GetFileName(fileName ?? ""); } catch { fileName = ""; }
             if (string.IsNullOrWhiteSpace(fileName)) fileName = "pCUE_setup.exe";
+            if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0) fileName = "pCUE_setup.exe";
             string target = Path.Combine(dir, fileName);
 
             if (progress != null) progress.Report("Downloading " + fileName + "...");
 
-            using (HttpResponseMessage response = await _http
-                       .GetAsync(info.DownloadUrl, HttpCompletionOption.ResponseHeadersRead,
-                                 cancellationToken).ConfigureAwait(false))
+            try
             {
-                response.EnsureSuccessStatusCode();
-                using (Stream src = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-                using (var dst = new FileStream(target, FileMode.Create, FileAccess.Write,
-                                                FileShare.None, 81920, true))
+                using (HttpResponseMessage response = await _http
+                           .GetAsync(info.DownloadUrl, HttpCompletionOption.ResponseHeadersRead,
+                                     cancellationToken).ConfigureAwait(false))
                 {
-                    await src.CopyToAsync(dst, 81920, cancellationToken).ConfigureAwait(false);
+                    response.EnsureSuccessStatusCode();
+                    if (response.Content.Headers.ContentLength.HasValue &&
+                        response.Content.Headers.ContentLength.Value > MaxInstallerBytes)
+                        throw new InvalidOperationException("Update installer too large; refusing download.");
+                    using (Stream src = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                    using (var dst = new FileStream(target, FileMode.Create, FileAccess.Write,
+                                                    FileShare.None, 81920, true))
+                    {
+                        var buffer = new byte[81920];
+                        long total = 0;
+                        int read;
+                        while ((read = await src.ReadAsync(buffer, 0, buffer.Length, cancellationToken).ConfigureAwait(false)) > 0)
+                        {
+                            total += read;
+                            if (total > MaxInstallerBytes)
+                                throw new InvalidOperationException("Update installer too large; refusing download.");
+                            await dst.WriteAsync(buffer, 0, read, cancellationToken).ConfigureAwait(false);
+                        }
+                    }
                 }
+            }
+            catch
+            {
+                TryDelete(target);
+                throw;
             }
 
             if (progress != null) progress.Report("Verifying checksum...");

@@ -61,13 +61,16 @@ namespace pCUE
         Computer thisComputer;
         readonly UpdateVisitor lhmUpdateVisitor = new UpdateVisitor();
 
-        //Timer for CPU Data
-        static System.Windows.Forms.Timer CpuDataTimer = new System.Windows.Forms.Timer();
+        //Timer for CPU Data (instance fields: a second MainWindow must not double-subscribe).
+        readonly System.Windows.Forms.Timer CpuDataTimer = new System.Windows.Forms.Timer();
 
         //Periodic UI refresh: keeps the tachometer panel honest about stale/lost signal. The
         //Min/Max/Avg statistics no longer need a timer - they are computed where each value is
         //produced (the poll loop and the CPU timer) instead of being parsed back out of TextBoxes.
-        static System.Windows.Forms.Timer Set_Min_Max_AVG_timer = new System.Windows.Forms.Timer();
+        readonly System.Windows.Forms.Timer Set_Min_Max_AVG_timer = new System.Windows.Forms.Timer();
+
+        //Guards the fan numeric<->slider mirror so a rounding asymmetry can never ping-pong.
+        bool syncingFanControls;
 
         //Min/Max/Avg statistics, computed from real values rather than read back out of the UI.
         //9 series: CPU temp/clock/load + six fan channels.
@@ -157,7 +160,10 @@ namespace pCUE
             get { return Target_Mode_Combo != null && Target_Mode_Combo.SelectedIndex == 1; }
         }
 
-        //In-app updater (checks a signed-manifest URL; never installs on its own).
+        //In-app updater (HTTPS manifest + sha256 integrity check; never installs on its own).
+        //NOTE: integrity only, not authenticity - a compromised manifest repo serving a matching
+        //url+sha256 would be accepted. The installer is launched only after two user confirms and
+        //is never executed automatically; see AppUpdateService for the trust statement.
         AppUpdateService updateService;
         //Set while an update installer is being launched, so Window_Closing skips its
         //"Really close?" prompt - the user has already confirmed the update.
@@ -282,7 +288,10 @@ namespace pCUE
 
         private void Window_Closed(object sender, EventArgs e)
         {
-            CpuDataTimer.Stop();
+            try { CpuDataTimer.Stop(); } catch { }
+            try { CpuDataTimer.Tick -= CpuDataTimer_Tick; } catch { }
+            try { Set_Min_Max_AVG_timer.Stop(); } catch { }
+            try { Set_Min_Max_AVG_timer.Tick -= Set_Min_Max_AVG_timer_Tick; } catch { }
 
             //stop the closed-loop hold before the HID stream goes away
             StopRpmHold("application closing");
@@ -319,11 +328,15 @@ namespace pCUE
             //An update install already asked for confirmation - do not ask a second time.
             if (suppressCloseConfirm)
             {
-                CpuDataTimer.Stop();
+                try { CpuDataTimer.Stop(); } catch { }
                 return;
             }
 
-            MessageBoxResult result = MessageBox.Show("Really close?", "Warning", MessageBoxButton.YesNo);
+            // Closing leaves the fans at their last commanded duty (the Commander keeps driving
+            // them); this prompt is about the window, not a power-off.
+            MessageBoxResult result = MessageBox.Show(
+                "Really close? Fans keep their current setting.",
+                "Warning", MessageBoxButton.YesNo);
             if (result != MessageBoxResult.Yes)
             {
                 e.Cancel = true;
@@ -331,7 +344,7 @@ namespace pCUE
 
             else
             {
-                CpuDataTimer.Stop();
+                try { CpuDataTimer.Stop(); } catch { }
             }
         }
         #endregion
@@ -489,6 +502,8 @@ namespace pCUE
         //Push the freshly polled RPMs onto the read-out text boxes. Runs on the UI thread.
         //Inactive/disconnected channels are cleared to "0" so stale RPMs never linger, and each
         //non-zero reading feeds that fan's Min/Max/Avg statistics at the moment it is produced.
+        //In remote mode the local poller keeps running but must not feed local stats: Reset only
+        //resets the remote side, so invisible accumulation would surface on return to This PC.
         private void UpdateFanRpmUi(int[] rpms)
         {
             if (rpms == null) return;
@@ -496,9 +511,12 @@ namespace pCUE
             for (int ch = 0; ch < 6; ch++)
             {
                 int idx = ch * 3;                     // channel -> "Current" index in Fan_array (0,3,6,9,12,15)
-                if (idx >= Fan_array.Length) return;
-                stats.Add(StatFanBase + ch, rpms[ch]);
-                if (!IsRemoteMode) Fan_array[idx].Text = rpms[ch].ToString();
+                if (idx + 2 >= Fan_array.Length) continue;
+                if (!IsRemoteMode)
+                {
+                    stats.Add(StatFanBase + ch, rpms[ch]);
+                    Fan_array[idx].Text = rpms[ch].ToString();
+                }
             }
 
             //Keep collecting the local session while another pCUE is on screen, but never let its
@@ -511,9 +529,23 @@ namespace pCUE
         //Single safe teardown for the Commander Pro connection + UI reset. MUST run on the UI
         //thread. Shared by manual disconnect, connect-failure cleanup and the automatic
         //disconnect that fires after repeated poll failures. Idempotent and null-safe.
+        //The acquisition revoke is fire-and-forget: awaiting it here would block the UI thread
+        //it needs to complete on (GetAwaiter().GetResult() deadlocked exactly this path).
         private void DisconnectCommanderPro(string statusText, System.Windows.Media.Brush statusBrush)
         {
-            if (AcquisitionLeased) acquisition.RevokeAsync("Commander disconnect requested.").GetAwaiter().GetResult();
+            if (AcquisitionLeased)
+            {
+                try
+                {
+                    var revoke = acquisition.RevokeAsync("Commander disconnect requested.");
+                    revoke.ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                            AppLog.Warn("Acquisition revoke on disconnect failed: " + t.Exception.GetBaseException().Message);
+                    }, TaskScheduler.Default);
+                }
+                catch (Exception ex) { AppLog.Warn("Acquisition revoke on disconnect failed: " + ex.Message); }
+            }
             StopRpmHold("Commander disconnected");   //the loop has no actuator without the device
             Corsair_Commander_Connected = false;
             StopFanPolling();   //cancellation only - never waits on the poll task
@@ -566,6 +598,7 @@ namespace pCUE
         //Set the fan mode (the drop-down's SelectionChanged handler).
         //Records each channel's last mode-write outcome so the remote API can report a rejection
         //to ITS caller too (the write itself happens inside the SelectionChanged event).
+        //Elements are accessed via Volatile.Read/Write: written on the UI thread, read on HTTP workers.
         readonly bool[] fanModeWriteOk = new bool[6];
 
         private async void Commander_Pro_Set_Fan_Connection_Mode(object sender, SelectionChangedEventArgs e)
@@ -624,9 +657,10 @@ namespace pCUE
                 return;
             }
             if (selected_fan == holdChannel) StopRpmHold("fan mode changed");
-            fanModeWriteOk[selected_fan] = commander.WriteFanDetectionType(selected_fan, type);
-            if (fanModeWriteOk[selected_fan]) Volatile.Write(ref acquisitionFanModes[selected_fan], (int)type);
-            if (!fanModeWriteOk[selected_fan])
+            bool modeOk = commander.WriteFanDetectionType(selected_fan, type);
+            Volatile.Write(ref fanModeWriteOk[selected_fan], modeOk);
+            if (modeOk) Volatile.Write(ref acquisitionFanModes[selected_fan], (int)type);
+            if (!modeOk)
             {
                 SetStatus("● Fan " + (selected_fan + 1) + ": mode change rejected by device",
                           System.Windows.Media.Brushes.Orange);
@@ -726,14 +760,23 @@ namespace pCUE
             public void VisitParameter(IParameter parameter) { }
         }
 
+        private bool cpuPollRunning;
+
         private void CpuDataTimer_Tick(object sender, EventArgs e)
         {
             if (thisComputer == null) return;
+            // LHM hardware.Update() can block for tens of ms on its kernel driver; running it on
+            // the UI thread is jank by construction and stacks with the 500 ms tach timer.
+            // Poll on the pool and marshal only the three formatted values back.
+            if (cpuPollRunning) return;
+            cpuPollRunning = true;
 
-            try
+            Task.Run(() =>
             {
-                //Refresh all CPU sensor values for this pass.
-                thisComputer.Accept(lhmUpdateVisitor);
+                try
+                {
+                    //Refresh all CPU sensor values for this pass.
+                    thisComputer.Accept(lhmUpdateVisitor);
 
                 double tempSum = 0; int tempCount = 0;   // per-core temps, used only if no package/average sensor exists
                 double clockSum = 0; int clockCount = 0; // per-core clocks, averaged into a single figure
@@ -789,20 +832,35 @@ namespace pCUE
                 latestCpuClock = clock;
                 latestCpuLoad = load;
 
-                CPU_array[0].Text = temperature.ToString("0.0");
-                CPU_array[3].Text = clock.ToString("N1");
-                CPU_array[6].Text = load.ToString("N1");
-
                 //Feed the statistics where the values are produced, then render Min/Max (or AVG).
                 stats.Add(StatCpuTemp, temperature);
                 stats.Add(StatCpuClock, clock);
                 stats.Add(StatCpuLoad, load);
-                RenderCpuMinMaxColumns();
-            }
+
+                string tempText = temperature.ToString("0.0");
+                string clockText = clock.ToString("N1");
+                string loadText = load.ToString("N1");
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    try
+                    {
+                        CPU_array[0].Text = tempText;
+                        CPU_array[3].Text = clockText;
+                        CPU_array[6].Text = loadText;
+                        RenderCpuMinMaxColumns();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.WriteLine("pCUE: CPU UI update failed: " + ex.Message);
+                    }
+                }));
+                }
             catch (Exception ex)
             {
                 Debug.WriteLine("pCUE: CPU sensor read failed: " + ex.Message);
             }
+            finally { cpuPollRunning = false; }
+            });
         }
         #endregion
 
@@ -820,20 +878,26 @@ namespace pCUE
 
         private void Kill_iCUE_Function()
         {
-            try
+            // Match by exact process name only; never by path. Runs elevated, so a same-named
+            // binary anywhere would be killed - the names below are Corsair-specific services.
+            string[] targets = { "CueLLAccessService", "Corsair.Service.CpuIdRemote64",
+                "Corsair.Service.CpuIdRemote", "Corsair.Service.DisplayAdapter", "Corsair.Service" };
+            foreach (System.Diagnostics.Process pr in System.Diagnostics.Process.GetProcesses())
             {
-                foreach (System.Diagnostics.Process pr in System.Diagnostics.Process.GetProcesses()) //GETS PROCESSES
+                bool match = false;
+                try { match = Array.IndexOf(targets, pr.ProcessName) >= 0; }
+                catch { try { pr.Dispose(); } catch { } continue; }
+                if (!match) { try { pr.Dispose(); } catch { } continue; }
+                try
                 {
-                    if ((pr.ProcessName == "CueLLAccessService") || (pr.ProcessName == "Corsair.Service.CpuIdRemote64") || (pr.ProcessName == "Corsair.Service.CpuIdRemote")
-                        || (pr.ProcessName == "Corsair.Service.DisplayAdapter") || (pr.ProcessName == "Corsair.Service"))
-                    {
-                        pr.Kill(); //KILLS THE PROCESSES
-                    }
+                    pr.Kill();
+                    pr.WaitForExit(5000);
                 }
-            }
-            catch (Exception e)
-            {
-                MessageBox.Show(e.ToString());
+                catch (Exception ex)
+                {
+                    AppLog.Warn("Could not stop " + pr.ProcessName + ": " + ex.Message);
+                }
+                finally { try { pr.Dispose(); } catch { } }
             }
         }
 
@@ -975,43 +1039,53 @@ namespace pCUE
 
         private void Fan_Numeric_ValueChanged(object sender, RoutedPropertyChangedEventArgs<uint> e)
         {
-            int changed = Array.IndexOf(Fan_Numeric_Boxes, sender as NumericUpDownLib.UIntegerUpDown);
-            if (remoteSnapshotApplying)
+            if (syncingFanControls) return;
+            syncingFanControls = true;
+            try
             {
-                if (changed >= 0) Fan_Slider[changed].Value = Fan_Numeric_Boxes[changed].Value;
-                return;
-            }
-            if (IsRemoteMode && changed >= 0) remoteSetpointDirty[changed] = true;
+                int changed = Array.IndexOf(Fan_Numeric_Boxes, sender as NumericUpDownLib.UIntegerUpDown);
+                if (remoteSnapshotApplying)
+                {
+                    if (changed >= 0) Fan_Slider[changed].Value = Fan_Numeric_Boxes[changed].Value;
+                    return;
+                }
+                if (IsRemoteMode && changed >= 0) remoteSetpointDirty[changed] = true;
 
-            if (Sync_Fans_CheckBox.IsChecked == true)
-            {
-                Fan1_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                Fan2_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                Fan3_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                Fan4_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                Fan5_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                Fan6_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
+                if (Sync_Fans_CheckBox.IsChecked == true)
+                {
+                    Fan1_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
+                    Fan2_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
+                    Fan3_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
+                    Fan4_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
+                    Fan5_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
+                    Fan6_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
+                }
+                else
+                {
+                    Fan1_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
+                    Fan2_Slider.Value = Decimal.ToInt32(Fan2_Numeric.Value);
+                    Fan3_Slider.Value = Decimal.ToInt32(Fan3_Numeric.Value);
+                    Fan4_Slider.Value = Decimal.ToInt32(Fan4_Numeric.Value);
+                    Fan5_Slider.Value = Decimal.ToInt32(Fan5_Numeric.Value);
+                    Fan6_Slider.Value = Decimal.ToInt32(Fan6_Numeric.Value);
+                }
             }
-            else
-            {
-                Fan1_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                Fan2_Slider.Value = Decimal.ToInt32(Fan2_Numeric.Value);
-                Fan3_Slider.Value = Decimal.ToInt32(Fan3_Numeric.Value);
-                Fan4_Slider.Value = Decimal.ToInt32(Fan4_Numeric.Value);
-                Fan5_Slider.Value = Decimal.ToInt32(Fan5_Numeric.Value);
-                Fan6_Slider.Value = Decimal.ToInt32(Fan6_Numeric.Value);
-            }
+            finally { syncingFanControls = false; }
         }
 
         private void Fan_Slider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            int changed = Array.IndexOf(Fan_Slider, sender as Slider);
-            if (remoteSnapshotApplying)
+            if (syncingFanControls) return;
+            syncingFanControls = true;
+            try
             {
-                if (changed >= 0) Fan_Numeric_Boxes[changed].Value = Convert.ToUInt32(Fan_Slider[changed].Value);
-                return;
-            }
-            if (IsRemoteMode && changed >= 0) remoteSetpointDirty[changed] = true;
+                int changed = Array.IndexOf(Fan_Slider, sender as Slider);
+                if (remoteSnapshotApplying)
+                {
+                    if (changed >= 0) Fan_Numeric_Boxes[changed].Value = Convert.ToUInt32(Fan_Slider[changed].Value);
+                    return;
+                }
+                if (IsRemoteMode && changed >= 0) remoteSetpointDirty[changed] = true;
 
             if (Sync_Fans_CheckBox.IsChecked == true)
             {
@@ -1031,6 +1105,8 @@ namespace pCUE
                 Fan5_Numeric.Value = Convert.ToUInt32(Fan5_Slider.Value);
                 Fan6_Numeric.Value = Convert.ToUInt32(Fan6_Slider.Value);
             }
+            }
+            finally { syncingFanControls = false; }
         }
 
         //for the Average Values CheckBox
@@ -1172,8 +1248,27 @@ namespace pCUE
 
         #region Remote control API (IRemoteControlTarget)
         //Every member here can be called from an HTTP worker thread, so anything that touches WPF
-        //or shared UI state is marshalled onto the UI thread with Dispatcher.Invoke. The HID calls
-        //themselves are serialized inside CommanderProDevice and are safe from any thread.
+        //or shared UI state is marshalled onto the UI thread with InvokeOnUi (Dispatcher.Invoke
+        //with a timeout). The timeout matters: if the UI thread is ever blocked - a modal
+        //MessageBox, a synchronous HID connect - an unbounded Invoke would queue every 500 ms
+        //remote poll behind it forever. HID calls themselves are serialized inside
+        //CommanderProDevice and are safe from any thread.
+
+        private static readonly TimeSpan UiInvokeTimeout = TimeSpan.FromSeconds(10);
+
+        private T InvokeOnUi<T>(Func<T> fn)
+        {
+            if (Dispatcher.CheckAccess()) return fn();
+            return Dispatcher.Invoke(fn, System.Windows.Threading.DispatcherPriority.Normal,
+                CancellationToken.None, UiInvokeTimeout);
+        }
+
+        private void InvokeOnUi(Action action)
+        {
+            if (Dispatcher.CheckAccess()) { action(); return; }
+            Dispatcher.Invoke(action, System.Windows.Threading.DispatcherPriority.Normal,
+                CancellationToken.None, UiInvokeTimeout);
+        }
 
         //Fan numbers are 1-6 on the wire (matching the UI labels); channels are 0-5 internally.
         private static bool TryChannel(int fan, out int channel, out string error)
@@ -1190,7 +1285,27 @@ namespace pCUE
 
         public PcueStatusSnapshot GetStatus()
         {
-            return Dispatcher.Invoke(new Func<PcueStatusSnapshot>(delegate
+            // HID/tach reads stay off the UI thread; only WPF controls are fetched inside InvokeOnUi.
+            double? tachRpm = bench_tach != null && bench_tach.IsConnected ? bench_tach.ReadRpm() : null;
+            bool tachConnected = bench_tach != null && bench_tach.IsConnected;
+            bool tachBattery = bench_tach != null && bench_tach.BatteryLow;
+            int tachAssigned = tachAssignedChannel;
+            int? holdDuty;
+            string dutySource;
+            bool holdRunning = rpmHold != null && rpmHold.IsRunning;
+            if (holdRunning)
+            {
+                holdDuty = rpmHold.CurrentDuty;
+                dutySource = "loop";
+            }
+            else
+            {
+                int tracked = commander.LastCommandedDuty(holdChannel);
+                holdDuty = tracked >= 0 ? (int?)tracked : null;
+                dutySource = tracked >= 0 ? "tracked" : "unknown";
+            }
+
+            return InvokeOnUi(new Func<PcueStatusSnapshot>(delegate
             {
                 var fans = new List<PcueFanStatus>();
                 for (int ch = 0; ch < 6; ch++)
@@ -1222,26 +1337,16 @@ namespace pCUE
                     });
                 }
 
-                double? tachRpm = bench_tach != null && bench_tach.IsConnected ? bench_tach.ReadRpm() : null;
+                double? tachRpmSnapshot = tachRpm;
 
                 //The duty reported here must be honest about its source. The old behaviour - always
                 //reporting the hold controller's last value even after it stopped - once showed 32%
                 //while the fan really ran at ~50%, and cost bench time. While a hold runs the
                 //controller's value IS live; otherwise report what pCUE last commanded on that
                 //channel, or nothing at all when this session never has.
-                int? holdDuty;
-                string dutySource;
-                if (rpmHold != null && rpmHold.IsRunning)
-                {
-                    holdDuty = rpmHold.CurrentDuty;
-                    dutySource = "loop";
-                }
-                else
-                {
-                    int tracked = commander.LastCommandedDuty(holdChannel);
-                    holdDuty = tracked >= 0 ? (int?)tracked : null;
-                    dutySource = tracked >= 0 ? "tracked" : "unknown";
-                }
+                //(tachRpm/holdDuty captured above, off the UI thread.)
+                int? holdDutySnapshot = holdDuty;
+                string dutySourceSnapshot = dutySource;
 
                 return new PcueStatusSnapshot
                 {
@@ -1286,19 +1391,19 @@ namespace pCUE
                     fans = fans,
                     tachometer = new PcueTachometerStatus
                     {
-                        connected = bench_tach != null && bench_tach.IsConnected,
-                        rpm = tachRpm,                      // null = stale or no signal
-                        batteryLow = bench_tach != null && bench_tach.BatteryLow,
-                        assignedFan = tachAssignedChannel >= 0 ? (int?)(tachAssignedChannel + 1) : null,
+                        connected = tachConnected,
+                        rpm = tachRpmSnapshot,              // null = stale or no signal
+                        batteryLow = tachBattery,
+                        assignedFan = tachAssigned >= 0 ? (int?)(tachAssigned + 1) : null,
                     },
                     hold = new PcueHoldStatus
                     {
-                        running = rpmHold != null && rpmHold.IsRunning,
+                        running = holdRunning,
                         status = rpmHold != null ? rpmHold.Status.ToString() : FanHoldStatus.Idle.ToString(),
                         display = Hold_Status_Label.Text,
                         fan = holdChannel >= 0 ? (int?)(holdChannel + 1) : null,
-                        duty = holdDuty,                    // null when this session never set one
-                        dutySource = dutySource,
+                        duty = holdDutySnapshot,            // null when this session never set one
+                        dutySource = dutySourceSnapshot,
                         target = (int)holdConfig.TargetRpm,
                         tachoAdjust = Tacho_Adjust_CheckBox.IsChecked == true,
                     },
@@ -1317,7 +1422,7 @@ namespace pCUE
 
         public async Task<PwmAcquisitionResponse> ExecuteAcquisitionAsync(string action, PwmAcquisitionRequest request)
         {
-            string refusal = Dispatcher.Invoke(new Func<string>(() =>
+            string refusal = InvokeOnUi(new Func<string>(() =>
             {
                 if (IsRemoteMode) return "Acquisition must target this PC, not a remote proxy.";
                 if (action == "lease" && rpmHold != null && rpmHold.IsRunning)
@@ -1336,7 +1441,7 @@ namespace pCUE
             if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
 
             //A remote duty command is the caller taking over from the hold loop.
-            Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote duty command"); }));
+            InvokeOnUi(new Action(delegate { StopRpmHold("remote duty command"); }));
             if (!Commander_Pro_Set_Fan_Power(channel, duty))
                 return "device rejected WRITE_FAN_POWER for fan " + fan + ".";
             return null;
@@ -1349,7 +1454,7 @@ namespace pCUE
             if (rpm <= 100 || rpm > 3500) return "value must be 101-3500 RPM (<=100 would be read as a percent).";
             if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
 
-            Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote rpm command"); }));
+            InvokeOnUi(new Action(delegate { StopRpmHold("remote rpm command"); }));
             if (!Commander_Pro_Set_Fan_Speed(channel, rpm))
                 return "device rejected WRITE_FAN_SPEED for fan " + fan +
                        " - fixed RPM needs a 4-pin/PWM channel.";
@@ -1373,8 +1478,8 @@ namespace pCUE
             }
 
             //Setting SelectedIndex raises SelectionChanged, which is what writes to the device.
-            Dispatcher.Invoke(new Action(delegate { Fan_Mode_Controls[channel].SelectedIndex = index; }));
-            if (!fanModeWriteOk[channel])
+            InvokeOnUi(delegate { Fan_Mode_Controls[channel].SelectedIndex = index; });
+            if (!Volatile.Read(ref fanModeWriteOk[channel]))
                 return "device rejected the mode change for fan " + fan + ".";
             return null;
         }
@@ -1389,7 +1494,7 @@ namespace pCUE
             if (!Corsair_Commander_Connected) return "Commander PRO is not connected.";
 
             string result = null;
-            Dispatcher.Invoke(new Action(delegate
+            InvokeOnUi(new Action(delegate
             {
                 //Populate the six boxes without the local Sync checkbox rewriting each assignment
                 //from Fan #1. Restore Sync immediately; it remains a view/edit convenience.
@@ -1419,7 +1524,7 @@ namespace pCUE
             if (rpm <= 0 || rpm > 3500) return "rpm must be 1-3500.";
 
             string result = null;
-            Dispatcher.Invoke(new Action(delegate
+            InvokeOnUi(new Action(delegate
             {
                 if (rpmHold != null && rpmHold.IsRunning) { result = "A hold is already running; stop it first."; return; }
                 Tach_Fan_Assign.SelectedIndex = fan;          // index 0 is "None"
@@ -1435,7 +1540,7 @@ namespace pCUE
         public string StopHold()
         {
             if (AcquisitionLeased) return AcquisitionBusy;
-            Dispatcher.Invoke(new Action(delegate { StopRpmHold("remote stop"); }));
+            InvokeOnUi(new Action(delegate { StopRpmHold("remote stop"); }));
             return null;
         }
 
@@ -1467,7 +1572,7 @@ namespace pCUE
         /// </summary>
         public string SetHoldConfig(Func<string, double?> get)
         {
-            return Dispatcher.Invoke(new Func<string>(delegate
+            return InvokeOnUi(new Func<string>(delegate
             {
                 try
                 {
@@ -1510,12 +1615,17 @@ namespace pCUE
                     {
                         if (holdChannel >= 0 && holdChannel < Fan_Numeric_Boxes.Length)
                             Fan_Numeric_Boxes[holdChannel].Value = (uint)next.TargetRpm;
-                        if (rpmHold != null && rpmHold.IsRunning) rpmHold.UpdateTarget(next.TargetRpm);
+                        if (rpmHold != null && rpmHold.IsRunning)
+                        {
+                            try { rpmHold.UpdateTarget(next.TargetRpm); }
+                            catch (ArgumentException ex) { return ex.Message; }
+                        }
                     }
                     AppLog.Info("Hold config updated via remote API (target live; other settings on next start).");
                     return null;
                 }
                 catch (ArgumentException ex) { return ex.Message; }
+                catch (TimeoutException) { return "UI busy; try again."; }
             }));
         }
 
@@ -1527,7 +1637,7 @@ namespace pCUE
         /// </summary>
         public byte[] CaptureScreenshot(string window)
         {
-            return Dispatcher.Invoke(new Func<byte[]>(delegate
+            return InvokeOnUi(new Func<byte[]>(delegate
             {
                 try
                 {
@@ -1586,23 +1696,31 @@ namespace pCUE
         {
             if (AcquisitionLeased) return AcquisitionBusy;
             string result = null;
-            Dispatcher.Invoke(new Action(delegate
+            try
             {
-                bool isOpen = Open_Corsair_Commander.Content.ToString() == "Close";
-                if (open == isOpen) { result = null; return; }      // already in the wanted state
-                Open_Corsair_Commander_Click(this, null);
-                if (open && !Corsair_Commander_Connected) result = "Could not open the Commander PRO.";
-            }));
+                InvokeOnUi(new Action(delegate
+                {
+                    bool isOpen = Open_Corsair_Commander.Content.ToString() == "Close";
+                    if (open == isOpen) { result = null; return; }      // already in the wanted state
+                    Open_Corsair_Commander_Click(this, null);
+                    if (open && !Corsair_Commander_Connected) result = "Could not open the Commander PRO.";
+                }));
+            }
+            catch (TimeoutException) { return "UI busy; try again."; }
             return result;
         }
 
         public string SetCpuMonitoring(bool on)
         {
-            Dispatcher.Invoke(new Action(delegate
+            try
             {
-                bool running = Start_CPU_data.Content.ToString() == "Stop";
-                if (on != running) Start_CPU_data_Click(this, null);
-            }));
+                InvokeOnUi(new Action(delegate
+                {
+                    bool running = Start_CPU_data.Content.ToString() == "Stop";
+                    if (on != running) Start_CPU_data_Click(this, null);
+                }));
+            }
+            catch (TimeoutException) { return "UI busy; try again."; }
             return null;
         }
 
@@ -1610,16 +1728,20 @@ namespace pCUE
         {
             if (AcquisitionLeased) return AcquisitionBusy;
             string result = null;
-            Dispatcher.Invoke(new Action(delegate
+            try
             {
-                if (bench_tach == null) { result = "Tachometer driver not available."; return; }
-                if (connected == bench_tach.IsConnected) return;
-                try
+                InvokeOnUi(new Action(delegate
                 {
-                    if (connected) bench_tach.Connect(); else bench_tach.Disconnect();
-                }
-                catch (Exception ex) { result = ex.Message; }
-            }));
+                    if (bench_tach == null) { result = "Tachometer driver not available."; return; }
+                    if (connected == bench_tach.IsConnected) return;
+                    try
+                    {
+                        if (connected) bench_tach.Connect(); else bench_tach.Disconnect();
+                    }
+                    catch (Exception ex) { result = ex.Message; }
+                }));
+            }
+            catch (TimeoutException) { return "UI busy; try again."; }
             return result;
         }
 
@@ -1627,44 +1749,44 @@ namespace pCUE
         {
             if (AcquisitionLeased) return AcquisitionBusy;
             if (fan < 0 || fan > 6) return "fan must be 0 (none) or 1-6.";
-            Dispatcher.Invoke(new Action(delegate { Tach_Fan_Assign.SelectedIndex = fan; }));
+            InvokeOnUi(new Action(delegate { Tach_Fan_Assign.SelectedIndex = fan; }));
             return null;
         }
 
         public string ResetStats()
         {
-            Dispatcher.Invoke(new Action(delegate { Reset_function(); }));
+            InvokeOnUi(new Action(delegate { Reset_function(); }));
             return null;
         }
 
         public string SetAverageValues(bool on)
         {
-            Dispatcher.Invoke(new Action(delegate { AVG_values.IsChecked = on; }));
+            InvokeOnUi(new Action(delegate { AVG_values.IsChecked = on; }));
             return null;
         }
 
         public string SetAutoStart(bool on)
         {
-            Dispatcher.Invoke(new Action(delegate { autostartCheckBox.IsChecked = on; }));
+            InvokeOnUi(new Action(delegate { autostartCheckBox.IsChecked = on; }));
             return null;
         }
 
         public string SetAutoConnect(bool on)
         {
-            Dispatcher.Invoke(new Action(delegate { Auto_Connect_CheckBox.IsChecked = on; }));
+            InvokeOnUi(new Action(delegate { Auto_Connect_CheckBox.IsChecked = on; }));
             return null;
         }
 
         public string SetTachoAdjust(bool on)
         {
             if (AcquisitionLeased) return AcquisitionBusy;
-            Dispatcher.Invoke(new Action(delegate { Tacho_Adjust_CheckBox.IsChecked = on; }));
+            InvokeOnUi(new Action(delegate { Tacho_Adjust_CheckBox.IsChecked = on; }));
             return null;
         }
 
         public string KillIcue()
         {
-            Dispatcher.Invoke(new Action(delegate { Kill_iCUE_Function(); }));
+            InvokeOnUi(new Action(delegate { Kill_iCUE_Function(); }));
             return null;
         }
 
@@ -2144,7 +2266,8 @@ namespace pCUE
                 SetRemoteStatus("● Failed", UpdateAlertBrush);
                 AppLog.Error("Remote control could not start: " + ex.Message);
                 MessageBox.Show("Remote control could not start:\n\n" + ex.Message +
-                    "\n\nA LAN port may need to be allowed through the firewall.",
+                    "\n\nA LAN port may need to be allowed through the firewall (TCP " +
+                    "5056 for the API, UDP 5057 for discovery).",
                     "pCUE", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
@@ -2495,6 +2618,10 @@ namespace pCUE
                         break;
                 }
             }
+            catch (OperationCanceledException)
+            {
+                SetUpdateStatus("Update check cancelled.", UpdateInfoBrush);
+            }
             catch (Exception ex)
             {
                 Debug.WriteLine("pCUE: update check failed: " + ex.Message);
@@ -2705,18 +2832,33 @@ namespace pCUE
 
         private void Startup(bool add)
         {
-            RegistryKey key = Registry.CurrentUser.OpenSubKey(
-                       @"Software\Microsoft\Windows\CurrentVersion\Run", true);
-            if (add)
+            // HKCU Run with requireAdministrator means Windows prompts for elevation on every
+            // logon ("prompt-start", not silent autostart). A logon scheduled task would avoid
+            // the prompt; kept as Run for now for explicitness - documented, not silent.
+            try
             {
-                //Surround path with " " to make sure that there are no problems
-                //if path contains spaces.
-                key.SetValue("pCUE", "\"" + System.Windows.Forms.Application.ExecutablePath + "\"");
+                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(
+                           @"Software\Microsoft\Windows\CurrentVersion\Run", true))
+                {
+                    if (key == null)
+                    {
+                        AppLog.Warn("Auto-start registry key not available.");
+                        return;
+                    }
+                    if (add)
+                    {
+                        //Surround path with " " to make sure that there are no problems
+                        //if path contains spaces.
+                        key.SetValue("pCUE", "\"" + System.Windows.Forms.Application.ExecutablePath + "\"");
+                    }
+                    else
+                        key.DeleteValue("pCUE", false);
+                }
             }
-            else
-                key.DeleteValue("pCUE");
-
-            key.Close();
+            catch (Exception ex)
+            {
+                AppLog.Warn("Auto-start registry update failed: " + ex.Message);
+            }
         }
 
         private async void Autostart(object sender, RoutedEventArgs e)
@@ -2729,17 +2871,24 @@ namespace pCUE
                 return;
             }
 
-            if (autostartCheckBox.IsChecked == true)
+            try
             {
-                this.Startup(true);
-                Properties.Settings.Default.AutoStart1 = true;
-                Properties.Settings.Default.Save();
+                if (autostartCheckBox.IsChecked == true)
+                {
+                    this.Startup(true);
+                    Properties.Settings.Default.AutoStart1 = true;
+                    Properties.Settings.Default.Save();
+                }
+                else
+                {
+                    this.Startup(false);
+                    Properties.Settings.Default.AutoStart1 = false;
+                    Properties.Settings.Default.Save();
+                }
             }
-            else
+            catch (Exception ex)
             {
-                this.Startup(false);
-                Properties.Settings.Default.AutoStart1 = false;
-                Properties.Settings.Default.Save();
+                AppLog.Warn("Auto-start setting failed: " + ex.Message);
             }
         }
 

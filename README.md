@@ -101,9 +101,17 @@ the cases apart: `0` success, `1` pCUE refused the request, `2` no pCUE reachabl
 
 ```powershell
 MSBuild pCUE\pCUE.csproj /p:Configuration=Debug
-pwsh scripts\Invoke-LocalCI.ps1     # build + remote integration + UI layout + packaging
-pwsh build\pack-release.ps1         # installer + portable zip into artifacts\
+pwsh scripts\Invoke-LocalCI.ps1          # build + tests + remote integration + UI layout + packaging
+pwsh scripts\Invoke-LocalCI.ps1 -NoPack  # same without the Release pack (which bumps the file version)
+pwsh build\pack-release.ps1              # installer + portable zip into artifacts\
 ```
+
+Hard constraints (see AGENTS.md / CLAUDE.md): HidSharp pinned at 2.1.0 and
+LibreHardwareMonitorLib at 0.9.4 (upgrading either breaks the Commander PRO HID session);
+AssemblyVersion stays 1.1.0.0 while AssemblyFileVersion auto-bumps on Release builds.
+The remote API speaks protocol v2; the acquisition extension (`/acquisition/*`) requires an
+`X-pCUE-Token` header. The updater reads `apps.pcue` from the shared
+`crmaris/powenetics-updates` manifest over HTTPS with sha256 integrity (not authenticity).
 
 ## Credits
 
@@ -112,5 +120,8 @@ Commander PRO protocol details come from the open-source reverse-engineering wor
 [liquidctl](https://github.com/liquidctl/liquidctl). CPU sensors via
 [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor), USB HID via
 [HidSharp](https://www.zer7.com/software/hidsharp).
+
+The installer is unsigned unless the release notes say otherwise; SHA-256 checksums are
+published with every release.
 
 Use at your own risk: this drives real hardware.

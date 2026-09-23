@@ -40,7 +40,7 @@ namespace pCUE
         {
             if (new[] { minimumSetpoint, maximumSetpoint, startSetpoint, maximumStep, maximumSlewPerSecond, rpmTolerance, maximumRpm }.Any(v => !Finite(v)) ||
                 minimumSetpoint < 0 || maximumSetpoint > 100 || minimumSetpoint > startSetpoint || startSetpoint > maximumSetpoint ||
-                maximumStep <= 0 || maximumStep > 100 || maximumSlewPerSecond <= 0 || rpmTolerance <= 0 || maximumRpm <= rpmTolerance || maximumRpm > 100000 ||
+                maximumStep <= 0 || maximumStep > 100 || maximumSlewPerSecond <= 0 || maximumSlewPerSecond > 100 || rpmTolerance <= 0 || maximumRpm <= rpmTolerance || maximumRpm > 100000 ||
                 settleMilliseconds < 200 || settleMilliseconds > 60000 || stabilityMilliseconds < 1000 || stabilityMilliseconds > 60000 ||
                 maximumSampleAgeMilliseconds < 100 || maximumSampleAgeMilliseconds > 2000 || approachTimeoutSeconds < 10 || approachTimeoutSeconds > 600 ||
                 new[] { minimumSetpoint, maximumSetpoint, startSetpoint, maximumStep }.Any(v => v != Math.Truncate(v)))
@@ -88,6 +88,8 @@ namespace pCUE
     }
     public sealed class PwmAcquisitionStatus
     {
+        // Acquisition protocol version (distinct from the remote-API protocolVersion in
+        // PcueRemoteClient.MinimumProtocolVersion). Kept as protocolVersion for wire compat.
         public int protocolVersion { get; set; } = 1;
         public string backend { get; set; } = "pCUE";
         public string hardwareMode { get; set; } = "Real";

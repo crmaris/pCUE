@@ -7,7 +7,8 @@
   exits non-zero the moment a stage fails, so it works equally well by hand or from a hook.
 
   Stages:
-    1. Debug build   - must produce no NEW warnings beyond the known baseline.
+    1. Debug build   - must produce no NEW warnings beyond the known baseline
+                       (scripts/WarningBaseline.txt; enforced by warning scan).
     2. Remote API    - runs a loopback server/client integration test, including authentication,
                        SSE snapshots, typed commands and protocol-version rejection.
     3. UI layout     - renders every window off-screen and fails on overlapping controls.
@@ -57,7 +58,34 @@ function Get-MSBuild {
 $msbuild = Get-MSBuild
 
 Step 'Build (Debug)' {
-    & $msbuild (Join-Path $root 'pCUE\pCUE.csproj') /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo
+    $buildLog = Join-Path ([System.IO.Path]::GetTempPath()) ('pcue-build-' + [Guid]::NewGuid().ToString('N') + '.log')
+    & $msbuild (Join-Path $root 'pCUE\pCUE.csproj') /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:normal /nologo /flp:"logfile=$buildLog;verbosity=normal" 2>&1 | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw "Debug build failed (exit $LASTEXITCODE). Log: $buildLog" }
+    # Enforce the warning baseline: the four HidSharp HidDeviceLoader CS0612 warnings are known.
+    # Lines are normalized to "warning CSxxxx: message" (paths/line numbers stripped) and deduped,
+    # so rebuilds on different checkouts compare equal.
+    $baseline = Join-Path $PSScriptRoot 'WarningBaseline.txt'
+    $warnings = @()
+    if (Test-Path $buildLog) {
+        $warnings = @(Select-String -Path $buildLog -Pattern 'warning (CS\d+): (.+?) \[' |
+            ForEach-Object { ('warning ' + $_.Matches[0].Groups[1].Value + ': ' + $_.Matches[0].Groups[2].Value).Trim() } |
+            Sort-Object -Unique)
+    }
+    if (Test-Path $baseline) {
+        $allowed = @(Get-Content $baseline | Where-Object { $_ -match '\S' -and $_ -notmatch '^\s*#' } | ForEach-Object { $_.Trim() } | Sort-Object -Unique)
+        $extra = @($warnings | Where-Object { $allowed -notcontains $_ })
+        $missing = @($allowed | Where-Object { $warnings -notcontains $_ })
+        if ($extra.Count -gt 0 -or $missing.Count -gt 0) {
+            Write-Host 'Build warning baseline mismatch:' -ForegroundColor Red
+            $extra | ForEach-Object { Write-Host "  NEW: $_" -ForegroundColor Red }
+            $missing | ForEach-Object { Write-Host "  GONE: $_" -ForegroundColor Yellow }
+            throw 'Debug build warnings differ from scripts/WarningBaseline.txt.'
+        }
+    } elseif ($warnings.Count -gt 0) {
+        Write-Host 'Build warnings (no baseline file to compare):' -ForegroundColor Yellow
+        $warnings | ForEach-Object { Write-Host "  $_" -ForegroundColor Yellow }
+    }
+    try { if (Test-Path $buildLog) { Remove-Item $buildLog -Force } } catch { }
 }
 
 Step 'Tachometer and RPM hold regression tests (no hardware)' {

@@ -200,6 +200,8 @@ namespace pCUE
             {
                 string line = await reader.ReadLineAsync().ConfigureAwait(false);
                 if (line == null) break;
+                // A hostile server could send an unbounded line; cap at 1 MB to bound memory.
+                if (line.Length > 1024 * 1024) throw new InvalidOperationException("Status stream line too large.");
                 if (!line.StartsWith("data: ", StringComparison.Ordinal)) continue;
 
                 PcueStatusSnapshot snapshot = _serializer.Deserialize<PcueStatusSnapshot>(line.Substring(6));

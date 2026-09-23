@@ -26,6 +26,7 @@
 #>
 [CmdletBinding()]
 param(
+  [ValidateSet('Release','Debug')]
   [string]$Configuration = 'Release',
   [switch]$SkipInstaller,
 
@@ -87,6 +88,9 @@ $proj      = Join-Path $root 'pCUE\pCUE.csproj'
 $artifacts = Join-Path $root 'artifacts'
 $stage     = Join-Path $artifacts 'stage\pCUE'
 
+if ($Configuration -ne 'Release') {
+  Write-Warning "Packing a non-Release ($Configuration) build: version bump and optimizations differ from shipped releases."
+}
 Write-Host "== pCUE release pack ==  config=$Configuration"
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }

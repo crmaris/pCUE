@@ -3,6 +3,7 @@
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <ProjectGuid>{C4D5E6F7-A8B9-4C0D-9E1F-A2B3C4D5E6F7}</ProjectGuid>
     <OutputType>Exe</OutputType><AssemblyName>pCUE.AcquisitionTests</AssemblyName>
     <TargetFrameworkVersion>v4.8</TargetFrameworkVersion><LangVersion>12.0</LangVersion>
     <OutputPath>bin\$(Configuration)\</OutputPath><DefineConstants>TRACE</DefineConstants>

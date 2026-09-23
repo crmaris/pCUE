@@ -22,6 +22,9 @@
   Safety: fans are driven to sane targets only (<=1500 RPM here), the tachometer is reassigned back
   to where it was, and the final state diff against the start snapshot is printed.
 
+  Security: the token is sent as X-pCUE-Token over plain HTTP on the bench LAN. Anyone on that
+  network can sniff it; run only on a trusted bench segment and rotate the token afterwards.
+
 .EXAMPLE
   pwsh tools\bench-validate.ps1 -Server 192.168.1.20 [-Token <secret>]
 #>
@@ -29,13 +32,17 @@
 param(
     [Parameter(Mandatory)] [string]$Server,
     [string]$Token,
-    # Hold targets. Defaults are gentle for a typical 120/140mm bench fan.
+    # Hold targets. Defaults are gentle for a typical 120/140mm bench fan. Clamped to <=1500.
     [double]$TargetHigh = 1200,
     [double]$TargetLow  = 1050,
     [int]   $ConvergeTimeoutSec = 180
 )
 
 $ErrorActionPreference = 'Stop'
+
+if ($TargetHigh -gt 1500) { throw "TargetHigh must be <= 1500 RPM (got $TargetHigh)." }
+if ($TargetLow -gt 1500) { throw "TargetLow must be <= 1500 RPM (got $TargetLow)." }
+if ($TargetHigh -le 0 -or $TargetLow -le 0) { throw "Targets must be positive RPM." }
 
 # ---------------------------------------------------------------- helpers
 $script:Hdr = @{}
@@ -53,8 +60,18 @@ function Invoke-Pcue {
     } catch {
         $respBody = $null
         try { $respBody = $_.ErrorDetails.Message } catch { }
-        return [pscustomobject]@{ __failed = $true; __status = $_.Exception.Response.StatusCode.value__; __body = $respBody }
+        $code = $null
+        try {
+            if ($null -ne $_.Exception.Response -and $null -ne $_.Exception.Response.StatusCode) {
+                $code = [int]$_.Exception.Response.StatusCode
+            }
+        } catch { }
+        return [pscustomobject]@{ __failed = $true; __status = $code; __body = $respBody }
     }
+}
+
+function Save-Text { param([string]$Name, [string]$Text)
+    Set-Content -Path (Join-Path $evidence $Name) -Value $Text -Encoding UTF8
 }
 
 $evidence = Join-Path $env:TEMP ('pcue-bench\' + (Get-Date -Format 'yyyyMMdd_HHmmss'))
@@ -106,7 +123,7 @@ if (-not $fan3pin) {
     $rejected = $false
     if ($r.__failed -and $r.__status -eq 400 -and $r.__body -match 'WRITE_FAN_SPEED') { $rejected = $true }
     $logText = (Invoke-Pcue -Path '/log?tail=40').lines -join "`n"
-    Save-Evidence 'A_log_tail.txt' $logText
+    Save-Text 'A_log_tail.txt' $logText
     $logged = $logText -match 'DEVICE REJECTED'
     if ($rejected -and $logged) {
         Record 'A 3-pin rejection' 'PASS' "fan $fan3pin refused by device (HTTP 400 + DEVICE REJECTED in log)"
@@ -128,7 +145,7 @@ if ($tachRes.__failed) {
     [void](Invoke-Pcue -Method Post -Path '/tach/assign' -Body @{ fan = $fanH })
 
     function Wait-Stable {
-        param([double]$Target, [int]$TimeoutSec)
+        param([double]$Target, [int]$TimeoutSec, [string]$Tag = '')
         $deadline = (Get-Date).AddSeconds($TimeoutSec)
         $timeline = @()
         while ((Get-Date) -lt $deadline) {
@@ -136,7 +153,7 @@ if ($tachRes.__failed) {
             $s = Invoke-Pcue -Path '/status'
             $h = $s.hold
             $rpm = $s.fans | Where-Object fan -eq $fanH | ForEach-Object rpm
-            $line = '{0:s}  status={1,-11} rpm={2,5} duty={3}' -f (Get-Date), $h.status, $rpm, $h.duty
+            $line = '{0:s}  [{1}] status={2,-11} rpm={3,5} duty={4}' -f (Get-Date), $Tag, $h.status, $rpm, $h.duty
             $timeline += $line
             if ($h.status -eq 'Stable' -and [Math]::Abs(($rpm ?? 0) - $Target) -le 35) {
                 return @{ ok = $true; rpm = $rpm; timeline = $timeline }
@@ -150,15 +167,15 @@ if ($tachRes.__failed) {
     if ($h1.__failed) { Record 'B dither descend+retarget' 'FAIL' "hold start refused: $($h1.__body)"; }
     else {
         $p1 = Wait-Stable -Target $TargetHigh -TimeoutSec $ConvergeTimeoutSec -Tag 'high'
-        Save-Evidence "B_phase1_$TargetHigh.json" ($p1.timeline -join "`n")
+        Save-Text "B_phase1_$TargetHigh.txt" ($p1.timeline -join "`n")
 
         # Phase 2: LIVE retarget lower while running - must drop any bracket and re-converge
         [void](Invoke-Pcue -Method Post -Path '/hold/config' -Body @{ target = $TargetLow })
         $p2 = Wait-Stable -Target $TargetLow -TimeoutSec $ConvergeTimeoutSec -Tag 'low'
-        Save-Evidence "B_phase2_$TargetLow.json" ($p2.timeline -join "`n")
+        Save-Text "B_phase2_$TargetLow.txt" ($p2.timeline -join "`n")
 
         $logText = (Invoke-Pcue -Path '/log?tail=200').lines -join "`n"
-        Save-Evidence 'B_log_tail.txt' $logText
+        Save-Text 'B_log_tail.txt' $logText
         $ditherSeen = $logText -match 'dither engaged|dithering'
         $retargetHandled = $logText -match 'resuming steps|dither exited'
 
@@ -201,4 +218,18 @@ $results | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $evidence 'summary.j
 
 $final = Invoke-Pcue -Path '/status'
 Save-Evidence '99_final_status.json' $final
+# Final-state diff against the start snapshot (the header promises this; previously only saved).
+foreach ($key in @('version')) {
+    if ($start.$key -ne $final.$key) { Write-Host ("changed {0}: '{1}' -> '{2}'" -f $key, $start.$key, $final.$key) }
+}
+try {
+    $startFans = @{}
+    foreach ($f in $start.fans) { $startFans[[int]$f.fan] = $f }
+    foreach ($f in $final.fans) {
+        $s = $startFans[[int]$f.fan]
+        if ($null -ne $s -and ($s.mode -ne $f.mode -or $s.rpm -ne $f.rpm)) {
+            Write-Host ("fan {0}: mode {1}->{2} rpm {3}->{4}" -f $f.fan, $s.mode, $f.mode, $s.rpm, $f.rpm)
+        }
+    }
+} catch { Write-Host "(fan diff unavailable: $_)" }
 Write-Host "Held fan left at ~$TargetLow RPM (its last stable target); modes were not changed. Full final state in 99_final_status.json."

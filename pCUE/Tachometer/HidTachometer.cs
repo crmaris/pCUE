@@ -59,10 +59,21 @@ namespace pCUE
         private const int SignificantByteIndex = 2;
 
         // A decoded RPM older than this is considered stale (no fresh signal).
-        public int StalenessMs { get; set; } = 1500;
+        // Clamped to 100..10000 ms: 0 would make every reading stale, negative would throw in comparisons.
+        private int _stalenessMs = 1500;
+        public int StalenessMs
+        {
+            get { return _stalenessMs; }
+            set { _stalenessMs = Math.Max(100, Math.Min(10000, value)); }
+        }
 
         // Read timeout so the loop periodically wakes to observe shutdown/removal.
-        public int ReadTimeoutMs { get; set; } = 2000;
+        private int _readTimeoutMs = 2000;
+        public int ReadTimeoutMs
+        {
+            get { return _readTimeoutMs; }
+            set { _readTimeoutMs = Math.Max(250, Math.Min(10000, value)); }
+        }
 
         private readonly object _stateLock = new object();
         private readonly object _rxLock = new object();
@@ -148,13 +159,16 @@ namespace pCUE
 
         // Returns the most recent valid and fresh RPM value, or null when no trustworthy reading is
         // currently available (device lost, stale, or out of range).
+        // Freshness uses the monotonic Stopwatch age (same as ReadAcquisitionSample), so an NTP
+        // step can never make one path fresh and the other stale.
         public double? ReadRpm()
         {
             if (!_connected) return null;
             lock (_rxLock)
             {
                 if (_latestRpmUtc == DateTime.MinValue) return null;
-                if ((DateTime.UtcNow - _latestRpmUtc).TotalMilliseconds > StalenessMs) return null;
+                double ageMs = (Stopwatch.GetTimestamp() - _sampleTimestamp) * 1000.0 / Stopwatch.Frequency;
+                if (ageMs < 0 || ageMs > StalenessMs) return null;
                 return _latestRpm;
             }
         }
@@ -304,17 +318,24 @@ namespace pCUE
                 }
                 catch (Exception ex)
                 {
-                    if (_running) { Debug.WriteLine("pCUE: tach HID read failed: " + ex.Message); HandleDeviceLost(stream); }
+                    if (_running)
+                    {
+                        AppLog.Warn("Tachometer HID read failed: " + ex.Message);
+                        Debug.WriteLine("pCUE: tach HID read failed: " + ex.Message);
+                        HandleDeviceLost(stream);
+                    }
                     break;
                 }
 
                 if (n <= 0) continue;
                 if (!firstReportLogged) { firstReportLogged = true; LogFirstReport(buffer, n); }
+                // ReadLoop already holds _rxLock; ProcessReport must not re-acquire it (Monitor is
+                // re-entrant, but the nesting hides who owns the session guard). Session check first.
                 lock (_rxLock)
                 {
                     // A closed reader must not publish into the replacement connection's session.
                     if (!ReferenceEquals(stream, _stream) || !_connected) break;
-                    ProcessReport(buffer, n);
+                    ProcessReportNoLock(buffer, n);
                 }
             }
         }
@@ -329,7 +350,7 @@ namespace pCUE
             }
         }
 
-        private void ProcessReport(byte[] buffer, int count)
+        private void ProcessReportNoLock(byte[] buffer, int count)
         {
             if (!_connected) return;
 
@@ -340,7 +361,6 @@ namespace pCUE
                 string hex = buffer[SignificantByteIndex].ToString("x2");
                 List<string> rpmDigits = null;
 
-                lock (_rxLock)
                 {
                     _hexList.Add(hex);
                     if (_hexList.Count > 64)

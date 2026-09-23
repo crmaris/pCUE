@@ -94,7 +94,7 @@
                 <Label Content="Fan #4" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,94,0,0" VerticalAlignment="Top" Height="25" Grid.ColumnSpan="2"/>
             </Grid>
         </GroupBox>
-        <GroupBox Header="`" HorizontalAlignment="Left" Margin="10,209,0,0" VerticalAlignment="Top" Height="198" Width="594" Grid.ColumnSpan="2"/>
+        <GroupBox Header="Fan Speed (0-100 = % power, 101+ = fixed RPM)" HorizontalAlignment="Left" Margin="10,209,0,0" VerticalAlignment="Top" Height="198" Width="594" Grid.ColumnSpan="2"/>
         <Grid x:Name="Fans_Grid" HorizontalAlignment="Left" Height="180" Margin="10,227,0,0" VerticalAlignment="Top" Width="529" Grid.ColumnSpan="2">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="256*"/>

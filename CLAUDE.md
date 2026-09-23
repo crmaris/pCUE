@@ -4,6 +4,60 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-23 — full code-review hardening, packaged 1.6.0
+
+A full review (hardware/control, remote/security, UI/updater, build/tests) found no ship-stopping
+defect in fencing, acquisition safety, versioning or packaging, and produced 3 CRITICAL + ~12 MAJOR
+fixes, all applied on master. Offline validation and unsigned 1.6.0 packaging are complete; no
+hardware calls or deployment were performed.
+
+Security: legacy mutating API routes now require POST and refuse cross-origin browser requests
+(loopback CSRF closed; `/hold/config` and `/log/level` enforce POST only when mutating, reads stay
+GET). Legacy JSON bodies are bounded at 32 KB and fail closed with 400; server 500s are sanitized;
+`?token=` still works on legacy routes but logs a deprecation warning (header preferred);
+acquisition stays header-only. HTTP concurrency is capped (20 requests, 4 streams); `/stream`
+interval clamped to 200–10000 ms and cancellable. SSE client caps lines at 1 MB. Discovery beacon
+is rate-limited per sender and documented LAN-trust-only.
+
+Correctness: ordinary Commander reads now validate length + status byte like acquisition reads;
+`TryReadFanPower` distinguishes off (0) from unknown (null); `WriteFanSpeed` validates
+channel/range; firmware read validates framing; busy-open reports "in use" distinctly;
+`NumericUpDownLib` marked `<Private>True`. Hold loop: `FineDutyStep` fixed at 1 (hardware
+resolution), `Status`/`CurrentDuty` volatile, stabilization on `Stopwatch`, `UpdateTarget` throws
+on bad input. Tachometer staleness unified on `Stopwatch`, tunables clamped. Acquisition:
+field-wise lease fingerprint, length-constant token compare, pre-lease status defaults to channel 1,
+slew capped, `outputOn` documented, worker-dispose no longer leaks the queue. `AppLog.Level`
+volatile; file writes outside the global lock.
+
+UI/updater: disconnect revokes acquisition fire-and-forget (was UI-thread deadlock);
+`InvokeOnUi` 10 s timeout on all remote-UI marshals; `GetStatus` reads HID/tach off-UI;
+CPU LHM sweep on pool with 3-value marshal; autostart registry null-safe + `DeleteValue(_,false)`;
+Kill-iCUE disposes per-process with `WaitForExit` and no stack-trace dialog; numeric/slider
+mirror guarded; remote mode no longer feeds local stats; updater trust documented as
+integrity-only (no Authenticode); downloads capped at 64 MB with cancel cleanup and filename
+sanitization; single-instance mutex + unhandled-exception handler; fan GroupBox labelled with the
+%/RPM dual scale; manifest declares Win7–10/11 support with DPI-awareness decision recorded;
+`App.config` synced to all 12 settings; assembly company/copyright set to Cybenetics LTD.
+
+Tests/build: `pCUE.sln` now includes `RpmHoldTests` + `AcquisitionTests` (with `ProjectGuid`s);
+`Invoke-LocalCI` enforces `scripts/WarningBaseline.txt` (3 normalized CS0612 lines);
+`pack-release -Configuration` validated with non-Release warning; `bench-validate.ps1` fixed
+(`Wait-Stable -Tag`, null-safe `Response.StatusCode`, text evidence, ≤1500 RPM clamps, final-state
+diff, HTTP-token sniffing warning); `make-icon -Blades` validated 2–12; layout gate logs its
+2 px tolerance. `RemoteProtocolTests` gained legacy POST/Origin/malformed-body/`?token=`/GET-status
+checks. `artifacts/` pruned to cited 1.5.5/1.5.6/1.5.8/1.5.9 + new 1.6.0 per the newest-only rule.
+
+Gate (this session): Debug build (baseline 3 warnings only), 14/14 RPM-hold, 45/45 acquisition,
+remote protocol integration (incl. new legacy-security checks), CLI parse, both WPF layout checks
+(18 Help + 116 Main, zero overlaps) — all green via `Invoke-LocalCI -NoPack`. Then Release-packed:
+
+- `artifacts/pCUE_1.6.0_setup.exe` SHA-256 `082ED056DD45DB5D482D1A9390CD1AB17A5C6FD250813512853F100A0E82FD0D`.
+- `artifacts/pCUE_1.6.0_portable.zip` (hash in its `.sha256` sidecar).
+
+Not published: no GitHub Release, no manifest update, no Sound-PC deployment. Bench acceptance
+(descending/retarget/dither, 3-pin rejection, restart read-back, post-Stop honesty) still owed on
+hardware. The public updater feed is unchanged.
+
 ## 2026-09-23 — three-pin DC and four-pin internal feedback acquisition, packaged 1.5.9
 
 Branch `codex/commander-dc-acquisition` extends the protected acquisition actor to three-pin DC

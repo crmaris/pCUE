@@ -36,6 +36,8 @@ namespace pCUE.RemoteProtocolTests
             var target = new FakeTarget();
             using var server = new RemoteControlServer(target, "http://127.0.0.1:" + port + "/", Token);
             server.Start();
+            await CheckLegacySecurityAsync(port);
+            target.ResetTestCounts();
             await CheckAcquisitionProtocolAsync(port, target);
 
             using (var invalid = new PcueRemoteClient())
@@ -117,6 +119,38 @@ namespace pCUE.RemoteProtocolTests
                 await ThrowsAsync<InvalidOperationException>(
                     () => oldClient.ConnectAsync("127.0.0.1", port, Token),
                     "too old");
+            }
+        }
+
+        private static async Task CheckLegacySecurityAsync(int port)
+        {
+            using (var http = new HttpClient { BaseAddress = new Uri("http://127.0.0.1:" + port), Timeout = TimeSpan.FromSeconds(5) })
+            {
+                // Mutating legacy routes require POST: a plain GET must not spin hardware (loopback CSRF).
+                var getMutation = new HttpRequestMessage(HttpMethod.Get, "/fan/duty?fan=1&value=50");
+                getMutation.Headers.Add("X-pCUE-Token", Token);
+                Assert((await http.SendAsync(getMutation)).StatusCode == HttpStatusCode.MethodNotAllowed,
+                    "legacy GET mutation refused");
+                // Cross-origin browser POSTs are refused.
+                var crossOrigin = new HttpRequestMessage(HttpMethod.Post, "/fan/duty?fan=1&value=50");
+                crossOrigin.Headers.Add("X-pCUE-Token", Token);
+                crossOrigin.Headers.Add("Origin", "https://evil.invalid");
+                Assert((await http.SendAsync(crossOrigin)).StatusCode == HttpStatusCode.Forbidden,
+                    "legacy cross-origin mutation refused");
+                // Malformed JSON fails closed with 400, never silent empty parameters.
+                var bad = new HttpRequestMessage(HttpMethod.Post, "/fans/apply");
+                bad.Headers.Add("X-pCUE-Token", Token);
+                bad.Content = new StringContent("{not-json", Encoding.UTF8, "application/json");
+                Assert((await bad.Content.ReadAsStringAsync()).Length > 0, "test body sanity");
+                Assert((await http.SendAsync(bad)).StatusCode == HttpStatusCode.BadRequest,
+                    "malformed legacy body refused");
+                // Deprecated ?token= still works for legacy routes (header preferred).
+                Assert((await http.PostAsync("/reset?token=" + Token, new StringContent(""))).IsSuccessStatusCode,
+                    "legacy ?token= compat");
+                // Read-only routes stay GET-able.
+                var status = new HttpRequestMessage(HttpMethod.Get, "/status");
+                status.Headers.Add("X-pCUE-Token", Token);
+                Assert((await http.SendAsync(status)).IsSuccessStatusCode, "status stays GET");
             }
         }
 
@@ -208,6 +242,7 @@ namespace pCUE.RemoteProtocolTests
             public bool TachoAdjust { get; private set; }
             public int ResetCount { get; private set; }
             public int KillCount { get; private set; }
+            public void ResetTestCounts() { ResetCount = 0; KillCount = 0; }
 
             public PcueStatusSnapshot GetStatus()
             {

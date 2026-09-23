@@ -2,7 +2,13 @@
 
 namespace pCUE
 {
-    /// <summary>Command bytes of the Corsair Commander PRO USB-HID protocol.</summary>
+    /// <summary>
+    /// Command bytes of the Corsair Commander PRO USB-HID protocol.
+    /// Payload layouts (verified on the bench 2026-08-08):
+    ///   0x28 = [0x02, fan, mode], 0x23 = [fan, duty 0-100], 0x24 = [fan, rpm_hi, rpm_lo].
+    /// Replies carry status at _in[1] (0x00 OK / 0x01 error) because _in[0] is HidSharp's
+    /// report-id byte; first DATA byte is _in[2]. Do not re-index without re-deriving that offset.
+    /// </summary>
     static class CorsairLightingProtocolConstants
     {
         public const int COMMAND_SIZE = 64;
@@ -26,6 +32,8 @@ namespace pCUE
         public const int WRITE_FAN_EXTERNAL_TEMP = 0x26;
         public const int WRITE_FAN_FORCE_THREE_PIN_MODE = 0x27;
         public const int WRITE_FAN_DETECTION_TYPE = 0x28;
+        // 0x29 is defined by the protocol but pCUE reads the mode via READ_FAN_MASK (0x20),
+        // which returns all six channels at once; the per-channel 0x29 read is intentionally unused.
         public const int READ_FAN_DETECTION_TYPE = 0x29;
         public const int READ_LED_STRIP_MASK = 0x30;
         public const int WRITE_LED_RGB_VALUE = 0x31;

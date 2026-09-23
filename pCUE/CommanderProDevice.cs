@@ -32,7 +32,7 @@ namespace pCUE
     /// A null <see cref="_stream"/> makes any in-flight call bail out; closing the stream
     /// interrupts a blocking transfer (timeouts are set at open).
     /// </summary>
-    public sealed class CommanderProDevice : IPwmAcquisitionHardware
+    public sealed class CommanderProDevice : IPwmAcquisitionHardware, IDisposable
     {
         public const int FanChannels = 6;
         private const int VendorId = 0x1b1c;   // Corsair
@@ -46,6 +46,7 @@ namespace pCUE
         private HidSharp.HidDevice _device;
         private HidSharp.HidStream _stream;
         private object _acquisitionOwner;
+        private volatile bool _isConnected;
         private string _acquisitionSampleSession = Guid.NewGuid().ToString("D");
         private readonly long[] _acquisitionSampleSequences = new long[FanChannels];
 
@@ -54,7 +55,7 @@ namespace pCUE
         // ACCEPTED, so it always reflects what the hardware is actually doing.
         private readonly int[] _lastCommandedDuty = new int[FanChannels] { -1, -1, -1, -1, -1, -1 };
 
-        public bool IsConnected { get; private set; }
+        public bool IsConnected { get { return _isConnected; } private set { _isConnected = value; } }
         public string FirmwareVersion { get; private set; } = "";
 
         public int LastCommandedDuty(int channel)
@@ -82,12 +83,21 @@ namespace pCUE
                     throw new CommanderProOpenException("Cannot open Commander Pro! Is it connected?", false);
                 }
 
-                if (device.GetProductName() != "Commander PRO")
-                    throw new CommanderProOpenException("Cannot open Commander Pro!", true);
-
+                string product;
                 HidSharp.HidStream stream;
-                if (!device.TryOpen(out stream))
-                    throw new CommanderProOpenException("Cannot open Commander Pro! Is it connected?", false);
+                try
+                {
+                    product = device.GetProductName();
+                    if (product != "Commander PRO")
+                        throw new CommanderProOpenException("Cannot open Commander Pro!", true);
+                    if (!device.TryOpen(out stream))
+                        throw new CommanderProOpenException("Cannot open Commander Pro! It may be in use by another app.", true);
+                }
+                catch (CommanderProOpenException) { throw; }
+                catch (Exception ex)
+                {
+                    throw new CommanderProOpenException("Cannot open Commander Pro! Is it connected? (" + ex.Message + ")", false);
+                }
 
                 // Bound any blocking HID transfer so a stalled device cannot hang the poll loop
                 // (or a UI command waiting on the lock) indefinitely.
@@ -123,6 +133,8 @@ namespace pCUE
             try { local.Dispose(); } catch { }
         }
 
+        public void Dispose() { try { Disconnect(); } catch { } }
+
         // ---------------------------------------------------------------- reads
 
         /// <summary>Which channels are populated, as the device's six detection digits ("011000").</summary>
@@ -132,14 +144,19 @@ namespace pCUE
             {
                 if (_stream == null) return "000000";
 
-                ClearOut();
-                _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_MASK;
-                _stream.Write(_out);
-                _stream.Read(_in);
+                try
+                {
+                    ClearOut(); Array.Clear(_in, 0, _in.Length);
+                    _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_MASK;
+                    _stream.Write(_out);
+                    int read = _stream.Read(_in);
+                    if (read < 8 || _in[1] != CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK) return "000000";
 
-                string fan_mask = "";
-                for (int k = 2; k < 8; k++) fan_mask += _in[k].ToString();
-                return (fan_mask.Length == 6) ? fan_mask : "000000";
+                    string fan_mask = "";
+                    for (int k = 2; k < 8; k++) fan_mask += _in[k].ToString();
+                    return (fan_mask.Length == 6) ? fan_mask : "000000";
+                }
+                catch { return "000000"; }
             }
         }
 
@@ -148,38 +165,59 @@ namespace pCUE
         {
             lock (_ioLock)
             {
-                if (_stream == null) return 0;
+                if (_stream == null || channel < 0 || channel >= FanChannels) return 0;
 
-                ClearOut();
-                _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_SPEED;
-                _out[2] = (byte)channel;
-                _stream.Write(_out);
-                _stream.Read(_in);
+                try
+                {
+                    ClearOut(); Array.Clear(_in, 0, _in.Length);
+                    _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_SPEED;
+                    _out[2] = (byte)channel;
+                    _stream.Write(_out);
+                    int read = _stream.Read(_in);
+                    if (read < 4 || _in[1] != CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK) return 0;
 
-                return (_in[2] << 8) + _in[3];
+                    return (_in[2] << 8) + _in[3];
+                }
+                catch { return 0; }
             }
         }
 
         /// <summary>
-        /// The duty percent the device is currently applying to the channel. Returns 0 when the
-        /// read fails - callers must treat 0 as "unknown", not "stopped".
+        /// The duty percent the device is currently applying to the channel.
+        /// Returns 0 when the read fails - callers must treat 0 as "unknown", not "stopped".
+        /// Prefer <see cref="TryReadFanPower"/> when you need to tell "off" apart from "unknown".
         /// </summary>
         public int ReadFanPower(int channel)
         {
+            int? v = TryReadFanPower(channel);
+            return v ?? 0;
+        }
+
+        /// <summary>
+        /// Validated duty read: null means the read failed (transport, short reply or
+        /// device status != OK). 0 is a genuine "off" reading, distinct from failure.
+        /// </summary>
+        public int? TryReadFanPower(int channel)
+        {
             lock (_ioLock)
             {
-                if (_stream == null) return 0;
+                if (_stream == null || channel < 0 || channel >= FanChannels) return null;
 
-                ClearOut();
-                _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_POWER;
-                _out[2] = (byte)channel;
-                _stream.Write(_out);
-                _stream.Read(_in);
+                try
+                {
+                    ClearOut(); Array.Clear(_in, 0, _in.Length);
+                    _out[1] = (byte)CorsairLightingProtocolConstants.READ_FAN_POWER;
+                    _out[2] = (byte)channel;
+                    _stream.Write(_out);
+                    int read = _stream.Read(_in);
+                    if (read < 3 || _in[1] != CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK) return null;
 
-                // Payload data starts at _in[2], same convention as READ_FAN_SPEED's
-                // _in[2]<<8|_in[3]. Verified against ground truth on the bench (2026-08-08):
-                // a fan left at 33% reported 33 after an app restart.
-                return _in[2] <= 100 ? _in[2] : 0;
+                    // Payload data starts at _in[2], same convention as READ_FAN_SPEED's
+                    // _in[2]<<8|_in[3]. Verified against ground truth on the bench (2026-08-08):
+                    // a fan left at 33% reported 33 after an app restart.
+                    return _in[2] <= 100 ? (int?)_in[2] : null;
+                }
+                catch { return null; }
             }
         }
 
@@ -188,10 +226,11 @@ namespace pCUE
         {
             try
             {
-                ClearOut();
+                ClearOut(); Array.Clear(_in, 0, _in.Length);
                 _out[1] = (byte)CorsairLightingProtocolConstants.READ_FIRMWARE_VERSION;
                 _stream.Write(_out);
-                _stream.Read(_in);
+                int read = _stream.Read(_in);
+                if (read < 5 || _in[1] != CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK) return "";
                 return _in[2] + "." + _in[3] + "." + _in[4];
             }
             catch (Exception ex)
@@ -227,7 +266,7 @@ namespace pCUE
                 _stream.Read(_in);
 
                 bool ok = LogExchange("WRITE_FAN_POWER fan=" + (channel + 1) + " duty=" + percent + "%", 4);
-                if (ok && channel >= 0 && channel < FanChannels) _lastCommandedDuty[channel] = percent;
+                if (ok) _lastCommandedDuty[channel] = percent;
                 return ok;
         }
 
@@ -237,6 +276,8 @@ namespace pCUE
             {
                 if (_acquisitionOwner != null) return false;
                 if (_stream == null) return false;
+                if (channel < 0 || channel >= FanChannels) return false;
+                if (rpm < 0 || rpm > 0xFFFF) return false;
 
                 ClearOut();
                 _out[1] = (byte)CorsairLightingProtocolConstants.WRITE_FAN_SPEED;
@@ -259,7 +300,7 @@ namespace pCUE
 
                 ClearOut();
                 _out[1] = (byte)CorsairLightingProtocolConstants.WRITE_FAN_DETECTION_TYPE;
-                _out[2] = 0x02;
+                _out[2] = 0x02;   // per-protocol prefix: 0x28 = [0x02, fan, mode]
                 _out[3] = (byte)channel;
                 _out[4] = (byte)type;
                 _stream.Write(_out);
@@ -285,6 +326,11 @@ namespace pCUE
         {
             lock (_ioLock) { if (ReferenceEquals(_acquisitionOwner, owner)) _acquisitionOwner = null; }
         }
+        /// <summary>
+        /// Acquisition-gated duty write. <paramref name="writeAllowed"/> runs while
+        /// <see cref="_ioLock"/> is held, so it MUST NOT block, wait on the worker queue,
+        /// or take another lock - it is a synchronous freshness/ownership snapshot only.
+        /// </summary>
         public bool WriteAcquisitionPower(object owner, int channel, int duty, string expectedDriveMode, Func<bool> writeAllowed)
         {
             lock (_ioLock)

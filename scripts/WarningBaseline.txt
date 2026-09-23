@@ -1,0 +1,6 @@
+# Known Debug-build warnings. Normalized as "warning CSxxxx: message" (paths stripped).
+# The Commander PRO code intentionally uses HidSharp 2.1.0's obsolete HidDeviceLoader API;
+# upgrading HidSharp breaks the HID session (see AGENTS.md). Any NEW line here fails local CI.
+warning CS0612: 'HidDeviceLoader' is obsolete
+warning CS0612: 'HidDeviceLoader.HidDeviceLoader()' is obsolete
+warning CS0612: 'HidDeviceLoader.GetDevices(int?, int?, int?, string)' is obsolete

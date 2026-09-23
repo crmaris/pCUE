@@ -95,7 +95,11 @@ namespace pCUE
             if (copy.MinDuty < 0 || copy.MaxDuty > 100 || copy.MinDuty > copy.MaxDuty ||
                 copy.StartDuty < copy.MinDuty || copy.StartDuty > copy.MaxDuty)
                 throw new ArgumentException("Duty limits must satisfy 0 <= min <= start <= max <= 100.");
-            if (copy.FineDutyStep < 1 || copy.CoarseDutyStep < copy.FineDutyStep || copy.CoarseDutyStep > 100 ||
+            // FineDutyStep is fixed at 1: the Commander accepts whole percent only, and the
+            // reversal/dither detection below keys on step<=1. A coarser fine step would hunt forever.
+            if (copy.FineDutyStep != 1)
+                throw new ArgumentException("Fine step must be 1 (whole-percent hardware resolution).");
+            if (copy.CoarseDutyStep < copy.FineDutyStep || copy.CoarseDutyStep > 100 ||
                 copy.SampleIntervalMs < 1 || copy.SettleDelayMs < 1 || copy.StabilizationTimeMs < 0 ||
                 copy.TimeoutMs < 0 || copy.RpmFilterWindow < 1 || copy.RpmFilterWindow > 1000 || copy.MaxInvalidRpmSamples < 1)
                 throw new ArgumentException("Invalid hold step, timing or sample-window settings.");
@@ -156,10 +160,13 @@ namespace pCUE
             _canRun = canRun ?? throw new ArgumentNullException(nameof(canRun));
         }
 
-        public FanHoldStatus Status { get; private set; } = FanHoldStatus.Idle;
+        private volatile FanHoldStatus _status = FanHoldStatus.Idle;
+        private volatile int _currentDuty;
+
+        public FanHoldStatus Status { get { return _status; } private set { _status = value; } }
         public bool IsRunning => Volatile.Read(ref _running) == 1;
         /// <summary>The duty the loop last programmed - left in place when the loop stops.</summary>
-        public int CurrentDuty { get; private set; }
+        public int CurrentDuty { get { return _currentDuty; } private set { _currentDuty = value; } }
 
         public event EventHandler<FanHoldSnapshot> SnapshotUpdated;
         public event EventHandler<FanHoldStatus> StatusChanged;
@@ -190,7 +197,8 @@ namespace pCUE
         /// <summary>Changes the setpoint of a running loop without restarting it.</summary>
         public void UpdateTarget(double rpm)
         {
-            if (double.IsNaN(rpm) || double.IsInfinity(rpm) || rpm <= 0) return;
+            if (double.IsNaN(rpm) || double.IsInfinity(rpm) || rpm <= 0)
+                throw new ArgumentException("Target must be a finite positive RPM.");
             lock (_targetLock) _targetRpm = rpm;
         }
 
@@ -202,7 +210,7 @@ namespace pCUE
             int duty = Clamp(cfg.StartDuty, cfg.MinDuty, cfg.MaxDuty);
             int invalidCount = 0;
             bool everStable = false;
-            DateTime? inToleranceSince = null;
+            Stopwatch inToleranceFor = null;
 
             // Resolution-limit tracking: we are at the floor once the finest step keeps flipping
             // direction. Remember the best duty seen so we can park on it rather than oscillate.
@@ -287,7 +295,7 @@ namespace pCUE
                         bestDuty = duty;
                         bestAbsError = double.MaxValue;
                         samples.Clear();
-                        inToleranceSince = null;
+                        inToleranceFor = null;
                         everStable = false;
                         overall.Restart();
                         SetStatus(FanHoldStatus.Ramping);
@@ -308,7 +316,7 @@ namespace pCUE
                     if (raw == null || double.IsNaN(raw.Value) || double.IsInfinity(raw.Value) || raw.Value <= 0)
                     {
                         samples.Clear();
-                        inToleranceSince = null;
+                        inToleranceFor = null;
                         SetStatus(everStable ? FanHoldStatus.Correcting : FanHoldStatus.Ramping);
                         invalidCount++;
                         if (invalidCount >= cfg.MaxInvalidRpmSamples)
@@ -425,13 +433,13 @@ namespace pCUE
 
                     if (absError <= cfg.RpmTolerance)
                     {
-                        if (inToleranceSince == null)
+                        if (inToleranceFor == null)
                         {
-                            inToleranceSince = DateTime.UtcNow;
+                            inToleranceFor = Stopwatch.StartNew();
                             SetStatus(FanHoldStatus.Stabilizing);
                         }
 
-                        if ((DateTime.UtcNow - inToleranceSince.Value).TotalMilliseconds >= cfg.StabilizationTimeMs)
+                        if (inToleranceFor.ElapsedMilliseconds >= cfg.StabilizationTimeMs)
                         {
                             everStable = true;
                             SetStatus(FanHoldStatus.Stable);
@@ -442,7 +450,7 @@ namespace pCUE
                     }
 
                     // --- out of tolerance: step ---
-                    inToleranceSince = null;
+                    inToleranceFor = null;
 
                     bool fineRegion = absError <= cfg.CoarseErrorThreshold;
                     int direction = Math.Sign(error);       // >0 need more RPM
@@ -588,6 +596,8 @@ namespace pCUE
 
         private static double Average(Queue<double> samples)
         {
+            // 0 when empty: FanHoldSnapshot.FilteredRpm is non-nullable, and 0 reads as
+            // "stopped" on the same scale the UI already uses for a stationary fan.
             return samples.Count == 0 ? 0 : samples.Average();
         }
 

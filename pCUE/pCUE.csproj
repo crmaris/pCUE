@@ -76,6 +76,7 @@
     </Reference>
     <Reference Include="NumericUpDownLib, Version=2.4.2.2, Culture=neutral, processorArchitecture=MSIL">
       <HintPath>..\packages\Dirkster.NumericUpDownLib.2.4.2.2\lib\net40\NumericUpDownLib.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Data" />

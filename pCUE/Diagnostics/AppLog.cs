@@ -33,7 +33,8 @@ namespace pCUE
         private static StreamWriter _fileWriter;
 
         /// <summary>Messages below this level are dropped. Debug is off by default (it is chatty).</summary>
-        public static LogLevel Level { get; set; } = LogLevel.Info;
+        private static volatile LogLevel _level = LogLevel.Info;
+        public static LogLevel Level { get { return _level; } set { _level = value; } }
 
         public static string FilePath { get { lock (Gate) return _filePath; } }
         public static bool FileEnabled { get { lock (Gate) return _toFile; } }
@@ -72,26 +73,34 @@ namespace pCUE
 
         public static void Write(LogLevel level, string message)
         {
-            if (level < Level) return;
+            if (level < _level) return;
 
             string line = DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)
                         + "  " + level.ToString().ToUpperInvariant().PadRight(5)
                         + "  " + (message ?? "");
 
+            StreamWriter writer;
             lock (Gate)
             {
                 Lines.Enqueue(line);
                 while (Lines.Count > MaxLines) Lines.Dequeue();
+                writer = _toFile ? _fileWriter : null;
+            }
 
-                if (_toFile)
+            // File I/O outside the global lock: a slow/full disk must not stall the poll,
+            // HID, hold or HTTP threads that share Gate. Failure disables the mirror.
+            if (writer != null)
+            {
+                try { writer.WriteLine(line); }
+                catch
                 {
-                    try { _fileWriter.WriteLine(line); }
-                    catch
+                    lock (Gate)
                     {
-                        //A failing file (disk full, share removed, ...) must never break the app;
-                        //drop the mirror and keep the in-memory buffer.
-                        _toFile = false;
-                        TryCloseWriterNoLock();
+                        if (ReferenceEquals(writer, _fileWriter))
+                        {
+                            _toFile = false;
+                            TryCloseWriterNoLock();
+                        }
                     }
                 }
             }

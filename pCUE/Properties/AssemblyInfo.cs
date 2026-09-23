@@ -10,9 +10,9 @@ using System.Windows;
 [assembly: AssemblyTitle("pCUE")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("")]
+[assembly: AssemblyCompany("Cybenetics LTD")]
 [assembly: AssemblyProduct("pCUE")]
-[assembly: AssemblyCopyright("Copyright ©  2020")]
+[assembly: AssemblyCopyright("Copyright © Cybenetics LTD")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
@@ -59,4 +59,4 @@ using System.Windows;
 // 1.3.8 -> 1.3.9 -> 1.4.0 -> 1.4.1 ... Keep it THREE components; the bump task will not
 // touch a four-part value.
 [assembly: AssemblyVersion("1.1.0.0")]
-[assembly: AssemblyFileVersion("1.5.9")]
+[assembly: AssemblyFileVersion("1.6.0")]

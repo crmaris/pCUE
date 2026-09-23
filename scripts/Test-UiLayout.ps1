@@ -191,7 +191,7 @@ function Test-Window {
     $win.Close()
 }
 
-Write-Host "UI layout check" -ForegroundColor Yellow
+Write-Host "UI layout check (tolerance $Tolerance px)" -ForegroundColor Yellow
 foreach ($x in (Get-ChildItem $ProjectDir -Filter *.xaml | Where-Object { $_.Name -ne 'App.xaml' })) {
     Test-Window -XamlPath $x.FullName
 }

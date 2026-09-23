@@ -81,7 +81,10 @@ namespace pCUE
     ///   * It binds to 127.0.0.1 by default.
     ///   * With NO token configured, requests from anywhere other than loopback are REFUSED, even if
     ///     the prefix was widened. Exposing it on the LAN therefore REQUIRES setting a token.
-    ///   * The token is accepted as the X-pCUE-Token header or a ?token= query parameter.
+    ///   * The token is accepted as the X-pCUE-Token header (preferred) or a ?token= query parameter
+    ///     (deprecated: query tokens leak into logs/Referer/shell history - a warning is logged when used).
+    ///   * Mutating legacy routes require POST and refuse cross-origin browser requests, so a plain
+    ///     &lt;img&gt;/link GET from a site visited on the bench PC cannot spin hardware (loopback CSRF).
     /// Note that binding to a non-loopback prefix needs either an admin process (pCUE already runs
     /// elevated) or a netsh urlacl reservation.
     ///
@@ -97,6 +100,10 @@ namespace pCUE
         private CancellationTokenSource _cts;
         private Task _worker;
         private bool _disposed;
+        // Bound concurrent legacy requests: each /stream holds a connection plus a UI-thread
+        // GetStatus per interval, so an unbounded burst would starve the UI/HID poll loop.
+        private readonly SemaphoreSlim _requestGate = new SemaphoreSlim(20, 20);
+        private readonly SemaphoreSlim _streamGate = new SemaphoreSlim(4, 4);
 
         public string Prefix { get; }
         public bool IsRunning { get; private set; }
@@ -162,13 +169,17 @@ namespace pCUE
 
         private async Task HandleAsync(HttpListenerContext context)
         {
+            bool requestGateTaken = false;
             try
             {
+                await _requestGate.WaitAsync().ConfigureAwait(false);
+                requestGateTaken = true;
+
                 if (!IsAuthorized(context.Request))
                 {
                     await WriteJsonAsync(context, HttpStatusCode.Unauthorized, new
                     {
-                        error = "Unauthorized. Send X-pCUE-Token (or ?token=). " +
+                        error = "Unauthorized. Send X-pCUE-Token header (preferred; ?token= is deprecated). " +
                                 "Without a configured token only loopback requests are accepted."
                     }).ConfigureAwait(false);
                     return;
@@ -181,6 +192,30 @@ namespace pCUE
                 {
                     await HandleAcquisitionAsync(context, path.Substring("/acquisition/".Length).ToLowerInvariant()).ConfigureAwait(false);
                     return;
+                }
+
+                string lower = path.ToLowerInvariant();
+                // /hold/config doubles as a GET read (no params) and a POST write; /log/level
+                // likewise reads on GET and writes when ?value= is present. Both enforce the
+                // method inside their own case. Every other mutating legacy route requires POST
+                // plus same-origin, so a plain <img>/link GET cannot spin hardware (loopback CSRF).
+                bool isMutatingLegacy = lower != "/" && lower != "/status" && lower != "/log" &&
+                    lower != "/hold/config" && !lower.StartsWith("/log/level") &&
+                    lower != "/stream" && lower != "/screenshot";
+                if (isMutatingLegacy)
+                {
+                    if (context.Request.HttpMethod != "POST")
+                    {
+                        await WriteJsonAsync(context, HttpStatusCode.MethodNotAllowed,
+                            new { error = "POST required." }).ConfigureAwait(false);
+                        return;
+                    }
+                    if (!IsSameOrigin(context.Request))
+                    {
+                        await WriteJsonAsync(context, HttpStatusCode.Forbidden,
+                            new { error = "Cross-origin requests are refused." }).ConfigureAwait(false);
+                        return;
+                    }
                 }
 
                 switch (path.ToLowerInvariant())
@@ -225,10 +260,28 @@ namespace pCUE
                         {
                             //No parameters at all = read; otherwise apply what was supplied.
                             Dictionary<string, object> body = await ReadBodyAsync(context.Request).ConfigureAwait(false);
-                            bool any = (body != null && body.Count > 0) || context.Request.QueryString.Count > 0;
+                            if (body == null)
+                            {
+                                await WriteJsonAsync(context, HttpStatusCode.BadRequest,
+                                    new { ok = false, error = "Invalid JSON body (or body too large)." }).ConfigureAwait(false);
+                                return;
+                            }
+                            bool any = body.Count > 0 || context.Request.QueryString.Count > 0;
                             if (!any)
                             {
                                 await WriteJsonAsync(context, HttpStatusCode.OK, _target.GetHoldConfig()).ConfigureAwait(false);
+                                return;
+                            }
+                            if (context.Request.HttpMethod != "POST")
+                            {
+                                await WriteJsonAsync(context, HttpStatusCode.MethodNotAllowed,
+                                    new { ok = false, error = "POST required." }).ConfigureAwait(false);
+                                return;
+                            }
+                            if (!IsSameOrigin(context.Request))
+                            {
+                                await WriteJsonAsync(context, HttpStatusCode.Forbidden,
+                                    new { ok = false, error = "Cross-origin requests are refused." }).ConfigureAwait(false);
                                 return;
                             }
 
@@ -331,6 +384,12 @@ namespace pCUE
                                     new { level = AppLog.Level.ToString() }).ConfigureAwait(false);
                                 return;
                             }
+                            if (context.Request.HttpMethod != "POST" || !IsSameOrigin(context.Request))
+                            {
+                                await WriteJsonAsync(context, context.Request.HttpMethod != "POST" ? HttpStatusCode.MethodNotAllowed : HttpStatusCode.Forbidden,
+                                    new { error = context.Request.HttpMethod != "POST" ? "POST required." : "Cross-origin requests are refused." }).ConfigureAwait(false);
+                                return;
+                            }
                             if (!Enum.TryParse(want, true, out LogLevel parsed))
                             {
                                 await WriteJsonAsync(context, HttpStatusCode.BadRequest,
@@ -383,14 +442,34 @@ namespace pCUE
             }
             catch (Exception ex)
             {
+                // Never echo internals (paths, HID details) to the caller: _target methods
+                // already return operator-safe error strings via Act(); anything thrown here
+                // is an unexpected transport failure.
+                AppLog.Warn("Remote request failed: " + ex);
                 Debug.WriteLine("pCUE: remote request failed: " + ex.Message);
                 try
                 {
                     await WriteJsonAsync(context, HttpStatusCode.InternalServerError,
-                        new { error = ex.Message }).ConfigureAwait(false);
+                        new { error = "Internal request failed." }).ConfigureAwait(false);
                 }
                 catch { }
             }
+            finally
+            {
+                if (requestGateTaken) _requestGate.Release();
+            }
+        }
+
+        private static bool IsSameOrigin(HttpListenerRequest request)
+        {
+            string origin = request.Headers["Origin"];
+            if (string.IsNullOrEmpty(origin)) return true;
+            try
+            {
+                return string.Equals(origin, request.Url.GetLeftPart(UriPartial.Authority),
+                    StringComparison.OrdinalIgnoreCase);
+            }
+            catch { return false; }
         }
 
         private async Task HandleAcquisitionAsync(HttpListenerContext context, string action)
@@ -446,6 +525,12 @@ namespace pCUE
         private async Task Act(HttpListenerContext context, Func<Dictionary<string, object>, string> action)
         {
             Dictionary<string, object> body = await ReadBodyAsync(context.Request).ConfigureAwait(false);
+            if (body == null)
+            {
+                await WriteJsonAsync(context, HttpStatusCode.BadRequest,
+                    new { ok = false, error = "Invalid JSON body (or body too large)." }).ConfigureAwait(false);
+                return;
+            }
             string error = action(body);
             if (error == null)
                 await WriteJsonAsync(context, HttpStatusCode.OK, new { ok = true, status = _target.GetStatus() }).ConfigureAwait(false);
@@ -453,34 +538,50 @@ namespace pCUE
                 await WriteJsonAsync(context, HttpStatusCode.BadRequest, new { ok = false, error }).ConfigureAwait(false);
         }
 
-        /// <summary>Server-sent events: the full status, repeatedly. ?interval=ms (default 1000).</summary>
+        /// <summary>Server-sent events: the full status, repeatedly. ?interval=ms (default 1000, 200..10000).</summary>
         private async Task StreamAsync(HttpListenerContext context)
         {
             int interval = ReadIntQuery(context.Request, "interval", 1000);
             if (interval < 200) interval = 200;
+            if (interval > 10000) interval = 10000;
 
-            HttpListenerResponse response = context.Response;
-            response.StatusCode = (int)HttpStatusCode.OK;
-            response.ContentType = "text/event-stream";
-            response.Headers["Cache-Control"] = "no-cache";
-
-            var serializer = new JavaScriptSerializer();
+            bool streamGateTaken = false;
             try
             {
-                Stream output = response.OutputStream;
-                await WriteChunk(output, ": pCUE status stream\nretry: 2000\n\n").ConfigureAwait(false);
-
-                while (IsRunning)
+                if (!await _streamGate.WaitAsync(0).ConfigureAwait(false))
                 {
-                    string json = serializer.Serialize(_target.GetStatus());
-                    await WriteChunk(output, "data: " + json + "\n\n").ConfigureAwait(false);
-                    await Task.Delay(interval).ConfigureAwait(false);
+                    await WriteJsonAsync(context, HttpStatusCode.ServiceUnavailable,
+                        new { error = "Too many status streams." }).ConfigureAwait(false);
+                    return;
                 }
+                streamGateTaken = true;
+
+                HttpListenerResponse response = context.Response;
+                response.StatusCode = (int)HttpStatusCode.OK;
+                response.ContentType = "text/event-stream";
+                response.Headers["Cache-Control"] = "no-cache";
+
+                var serializer = new JavaScriptSerializer();
+                try
+                {
+                    Stream output = response.OutputStream;
+                    await WriteChunk(output, ": pCUE status stream\nretry: 2000\n\n").ConfigureAwait(false);
+
+                    CancellationToken ct = _cts != null ? _cts.Token : CancellationToken.None;
+                    while (IsRunning && !ct.IsCancellationRequested)
+                    {
+                        string json = serializer.Serialize(_target.GetStatus());
+                        await WriteChunk(output, "data: " + json + "\n\n").ConfigureAwait(false);
+                        try { await Task.Delay(interval, ct).ConfigureAwait(false); }
+                        catch (OperationCanceledException) { break; }
+                    }
+                }
+                catch (HttpListenerException) { /* client went away */ }
+                catch (ObjectDisposedException) { }
+                catch (Exception ex) { Debug.WriteLine("pCUE: remote stream ended: " + ex.Message); }
+                finally { try { response.Close(); } catch { } }
             }
-            catch (HttpListenerException) { /* client went away */ }
-            catch (ObjectDisposedException) { }
-            catch (Exception ex) { Debug.WriteLine("pCUE: remote stream ended: " + ex.Message); }
-            finally { try { response.Close(); } catch { } }
+            finally { if (streamGateTaken) _streamGate.Release(); }
         }
 
         private static async Task WriteChunk(Stream output, string text)
@@ -529,7 +630,7 @@ namespace pCUE
                 },
                 auth = string.IsNullOrEmpty(_token)
                     ? "No token configured, so only loopback requests are accepted."
-                    : "Send X-pCUE-Token or ?token=.",
+                    : "Send X-pCUE-Token header (?token= is deprecated).",
             };
         }
 
@@ -546,7 +647,12 @@ namespace pCUE
 
             string header = request.Headers["X-pCUE-Token"] ?? "";
             string query = request.QueryString["token"] ?? "";
-            return FixedTimeEquals(header, _token) || FixedTimeEquals(query, _token);
+            if (query.Length > 0 && FixedTimeEquals(query, _token))
+            {
+                AppLog.Warn("Remote request used deprecated ?token= query authentication; send X-pCUE-Token header instead.");
+                return true;
+            }
+            return FixedTimeEquals(header, _token);
         }
 
         /// <summary>Constant-time string equality (byte-wise, length-safe).</summary>
@@ -569,21 +675,36 @@ namespace pCUE
         }
 
         // ------------------------------------------------------------------ parameter helpers
+        private const int MaxLegacyBodyBytes = 32768;
+
         private static async Task<Dictionary<string, object>> ReadBodyAsync(HttpListenerRequest request)
         {
             if (!request.HasEntityBody) return new Dictionary<string, object>();
             try
             {
-                using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
-                string text = await reader.ReadToEndAsync().ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(text)) return new Dictionary<string, object>();
-                var parsed = new JavaScriptSerializer().DeserializeObject(text) as Dictionary<string, object>;
-                return parsed ?? new Dictionary<string, object>();
+                if (request.ContentLength64 > MaxLegacyBodyBytes) return null;
+                using (var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8))
+                {
+                    var body = new StringBuilder();
+                    var chunk = new char[4096];
+                    int count;
+                    while ((count = await reader.ReadAsync(chunk, 0, chunk.Length).ConfigureAwait(false)) > 0)
+                    {
+                        body.Append(chunk, 0, count);
+                        if (body.Length > MaxLegacyBodyBytes) return null;
+                    }
+                    string text = body.ToString();
+                    if (string.IsNullOrWhiteSpace(text)) return new Dictionary<string, object>();
+                    var parsed = new JavaScriptSerializer { MaxJsonLength = MaxLegacyBodyBytes, RecursionLimit = 8 }
+                        .DeserializeObject(text) as Dictionary<string, object>;
+                    // Malformed JSON must fail closed (400), never silently become empty parameters.
+                    return parsed;
+                }
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("pCUE: remote body parse failed: " + ex.Message);
-                return new Dictionary<string, object>();
+                return null;
             }
         }
 
