@@ -23,6 +23,11 @@ namespace pCUE
     public static class AppLog
     {
         private const int MaxLines = 4000;
+        // File mirror cap: at 2 MB the log rotates to ".1" (one backup kept). A bench left in
+        // Debug for a week must not fill the disk; the in-memory buffer is unaffected.
+        private const long MaxLogFileBytes = 2L * 1024 * 1024;
+        private const long SizeCheckIntervalBytes = 512L * 1024;
+        private static long _bytesSinceSizeCheck;
 
         private static readonly object Gate = new object();
         private static readonly Queue<string> Lines = new Queue<string>(MaxLines);
@@ -85,10 +90,21 @@ namespace pCUE
                 Lines.Enqueue(line);
                 while (Lines.Count > MaxLines) Lines.Dequeue();
                 writer = _toFile ? _fileWriter : null;
+                if (writer != null)
+                {
+                    _bytesSinceSizeCheck += line.Length + 2;
+                    if (_bytesSinceSizeCheck >= SizeCheckIntervalBytes)
+                    {
+                        _bytesSinceSizeCheck = 0;
+                        CheckRotationNoLock();
+                        writer = _toFile ? _fileWriter : null;
+                    }
+                }
             }
 
             // File I/O outside the global lock: a slow/full disk must not stall the poll,
-            // HID, hold or HTTP threads that share Gate. Failure disables the mirror.
+            // HID, hold or HTTP threads that share Gate. A genuine failure disables the mirror;
+            // a writer swapped by rotation is simply stale (the line is already buffered).
             if (writer != null)
             {
                 try { writer.WriteLine(line); }
@@ -112,6 +128,45 @@ namespace pCUE
         {
             try { _fileWriter?.Dispose(); } catch { }
             _fileWriter = null;
+        }
+
+        // Call with Gate held. Rolls the file to "<path>.1" when it exceeds the cap.
+        private static void CheckRotationNoLock()
+        {
+            try
+            {
+                if (!_toFile || string.IsNullOrEmpty(_filePath)) return;
+                var info = new FileInfo(_filePath);
+                if (!info.Exists || info.Length < MaxLogFileBytes) return;
+                TryCloseWriterNoLock();
+                _toFile = false;
+                try
+                {
+                    string backup = _filePath + ".1";
+                    if (File.Exists(backup)) File.Delete(backup);
+                    File.Move(_filePath, backup);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine("pCUE: log rotation failed: " + ex.Message);
+                }
+                try
+                {
+                    _fileWriter = new StreamWriter(_filePath, append: false, Encoding.UTF8) { AutoFlush = true };
+                    _fileWriter.WriteLine("pCUE log rotated " + DateTime.Now);
+                    _toFile = true;
+                    _bytesSinceSizeCheck = 0;
+                }
+                catch (Exception ex)
+                {
+                    TryCloseWriterNoLock();
+                    System.Diagnostics.Debug.WriteLine("pCUE: could not reopen log file: " + ex.Message);
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("pCUE: log rotation check failed: " + ex.Message);
+            }
         }
 
         /// <summary>Most recent lines, oldest first. Used by the remote API's /log endpoint.</summary>

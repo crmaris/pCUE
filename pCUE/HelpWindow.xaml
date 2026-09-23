@@ -135,6 +135,8 @@
                     <LineBreak/><Bold>Allow remote</Bold> lets another pCUE or the CLI control this PC.
                     With the <Bold> Token</Bold> box empty it listens on this PC only; entering a token is
                     what allows access from other machines, and every such request must then present it.
+                    The server token is sealed with Windows DPAPI, so a copied config cannot be reused
+                    elsewhere; the client token is kept in memory only.
                     <Bold> Debug log</Bold> records detailed diagnostics to
                     %LOCALAPPDATA%\pCUE\logs, which is what to send if something misbehaves.
                 </TextBlock>

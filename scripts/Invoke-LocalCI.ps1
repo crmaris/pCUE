@@ -112,6 +112,10 @@ Step 'Remote protocol integration' {
     $parseErrors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($cli, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+
+    # Bench script offline gate: parameter validation + plan without a bench PC.
+    & (Join-Path $root 'tools\bench-validate.ps1') -Server 127.0.0.1 -DryRun
+    if ($LASTEXITCODE -ne 0) { throw 'bench-validate dry run failed.' }
 }
 
 Step 'UI layout' {

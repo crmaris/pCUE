@@ -4,6 +4,36 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-23 — improvement batch (unreleased, master only)
+
+Offline work only; no hardware calls, no packaging (file version stays 1.6.0), no manifest change.
+
+Trust: updater gained optional `ExpectedSignerThumbprint` pinning (new `Update_Signer_Thumbprint`
+setting, empty = integrity-only as before; mismatched/unsigned downloads deleted + refused) with an
+offline signer-helper test; server token now DPAPI-sealed at rest (`Remote/ProtectedToken.cs`,
+legacy plaintext migrates on next save, `--remote-token=` sealed immediately); autostart moved from
+HKCU Run to a logon scheduled task (`/rl highest`, no per-logon UAC prompt, legacy Run value
+removed as migration).
+
+Reliability: tach read failures debounced 3× before dropping the session; frame-desync recovery
+after 500 reports without CRLF; Commander auto-reconnect on USB arrival when auto-connect is on
+(5 s debounce, arrival subscription torn down on close); UI-stall watchdog (5 s pool ping, 20 s
+threshold) revokes an acquisition lease to park output at zero; `AppLog` rotates at 2 MB (one `.1`
+backup) with rotation-safe failure handling; `Settings.Upgrade()` guard in `App.OnStartup` (no-op
+under the pinned AssemblyVersion).
+
+UI/docs: Kill/Reset buttons to white-on-red, autostart checkbox yellow wash removed, help documents
+DPAPI + memory-only client token; full DPI-fluid rewrite explicitly deferred (fixed 626×687 layout
+per manifest decision). `bench-validate.ps1` gained `-DryRun`, wired into local CI.
+
+Tests: `RemoteProtocolTests` gained offline hardware-guard checks (absent Commander fails safe,
+WriteFanSpeed validation, unsigned-signer helper) and a loopback discovery-responder check. Gate
+green via `Invoke-LocalCI -NoPack` (14/14 hold, 45/45 acquisition, remote incl. new checks,
+bench dry-run, 18+116 layout zero overlaps). Note: one transient acquisition timing failure seen
+under parallel MSBuild load, 45/45 on immediate re-run — suite is timing-sensitive, not a code
+regression (no linked files changed). GitHub Actions CI deliberately NOT added: pCUE has no
+registered self-hosted runner and gets local-only validation until the owner approves one.
+
 ## 2026-09-23 — full code-review hardening, packaged 1.6.0
 
 A full review (hardware/control, remote/security, UI/updater, build/tests) found no ship-stopping

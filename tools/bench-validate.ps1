@@ -35,7 +35,9 @@ param(
     # Hold targets. Defaults are gentle for a typical 120/140mm bench fan. Clamped to <=1500.
     [double]$TargetHigh = 1200,
     [double]$TargetLow  = 1050,
-    [int]   $ConvergeTimeoutSec = 180
+    [int]   $ConvergeTimeoutSec = 180,
+    # Validate parameters and print the plan without touching the network (offline CI).
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = 'Stop'
@@ -43,6 +45,14 @@ $ErrorActionPreference = 'Stop'
 if ($TargetHigh -gt 1500) { throw "TargetHigh must be <= 1500 RPM (got $TargetHigh)." }
 if ($TargetLow -gt 1500) { throw "TargetLow must be <= 1500 RPM (got $TargetLow)." }
 if ($TargetHigh -le 0 -or $TargetLow -le 0) { throw "Targets must be positive RPM." }
+if ($ConvergeTimeoutSec -le 0) { throw "ConvergeTimeoutSec must be positive." }
+
+if ($DryRun) {
+    Write-Host "bench-validate DRY RUN (no network contact)"
+    Write-Host "  server=$Server targetHigh=$TargetHigh targetLow=$TargetLow convergeTimeout=${ConvergeTimeoutSec}s"
+    Write-Host "  checks: A 3-pin rejection, B dither descend+retarget, D /status honesty, C restart retry (manual)"
+    exit 0
+}
 
 # ---------------------------------------------------------------- helpers
 $script:Hdr = @{}

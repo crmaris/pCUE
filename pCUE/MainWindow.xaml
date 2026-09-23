@@ -132,9 +132,9 @@
             <Button x:Name="Open_Corsair_Commander" Content="Open" Grid.Column="1" HorizontalAlignment="Left" Margin="160.4,132,0,0" VerticalAlignment="Top" Width="75" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Open_Corsair_Commander_Click"/>
 
         </Grid>
-        <Button x:Name="Reset_Button" Content="Reset" HorizontalAlignment="Left" Margin="197,160,0,0" VerticalAlignment="Top" Width="75" FontWeight="Bold" Background="#FFFB2706" Foreground="#FFE6F906" Grid.ColumnSpan="2" Click="Reset_Button_Click"/>
-        <Button x:Name="Kill_iCUE_services" Content="Kill iCUE" HorizontalAlignment="Left" Margin="109,160,0,0" VerticalAlignment="Top" Width="75" RenderTransformOrigin="0.803,1" FontWeight="Bold" Foreground="#FF02DDF9" Background="#FFFB2706" Click="Kill_iCUE_services_Click"/>
-        <CheckBox x:Name="autostartCheckBox" Content="Auto Start" HorizontalAlignment="Left" Margin="10,164,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" Background="#FFF5E242" Checked="Autostart" Unchecked="Autostart"/>
+        <Button x:Name="Reset_Button" Content="Reset" HorizontalAlignment="Left" Margin="197,160,0,0" VerticalAlignment="Top" Width="75" FontWeight="Bold" Background="#FFFB2706" Foreground="White" Grid.ColumnSpan="2" Click="Reset_Button_Click"/>
+        <Button x:Name="Kill_iCUE_services" Content="Kill iCUE" HorizontalAlignment="Left" Margin="109,160,0,0" VerticalAlignment="Top" Width="75" RenderTransformOrigin="0.803,1" FontWeight="Bold" Foreground="White" Background="#FFFB2706" Click="Kill_iCUE_services_Click"/>
+        <CheckBox x:Name="autostartCheckBox" Content="Auto Start" HorizontalAlignment="Left" Margin="10,164,0,0" VerticalAlignment="Top" Foreground="#FFF5EFEF" Checked="Autostart" Unchecked="Autostart"/>
         <TextBox x:Name="Commander_SN" HorizontalAlignment="Left" Height="23" Margin="123,184,0,0" TextWrapping="Wrap" VerticalAlignment="Top" Width="120" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" Background="#FF15743E" Foreground="#FFF6F1F1" Grid.ColumnSpan="2"/>
         <Label Content="Commander SN:" Style="{StaticResource White_Labels}" HorizontalAlignment="Left" Margin="10,184,0,0" VerticalAlignment="Top" Height="25"/>
         <Button x:Name="Help_Button" Content="?" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="249,184,0,0" Width="24" Height="23" FontWeight="Bold" Background="#FF3806FB" Foreground="#FFFBF5F5" ToolTip="What does each control do?" Click="Help_Button_Click"/>

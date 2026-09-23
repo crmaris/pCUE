@@ -34,6 +34,8 @@ namespace pCUE.RemoteProtocolTests
         {
             int port = GetFreeTcpPort();
             var target = new FakeTarget();
+            CheckOfflineHardwareGuards();
+            await CheckDiscoveryResponderAsync();
             using var server = new RemoteControlServer(target, "http://127.0.0.1:" + port + "/", Token);
             server.Start();
             await CheckLegacySecurityAsync(port);
@@ -215,6 +217,55 @@ namespace pCUE.RemoteProtocolTests
             int port = ((IPEndPoint)listener.LocalEndpoint).Port;
             listener.Stop();
             return port;
+        }
+
+        private static int GetFreeUdpPort()
+        {
+            using (var udp = new UdpClient(0))
+                return ((IPEndPoint)udp.Client.LocalEndPoint).Port;
+        }
+
+        // No hardware is touched: the Commander is absent, so every guard must fail safe.
+        private static void CheckOfflineHardwareGuards()
+        {
+            var commander = new CommanderProDevice();
+            Assert(commander.ReadFanMask() == "000000", "absent Commander reports empty fan mask");
+            Assert(commander.ReadFanRpm(0) == 0, "absent Commander reads 0 RPM");
+            Assert(commander.TryReadFanPower(0) == null, "absent Commander power is unknown, not off");
+            Assert(!commander.WriteFanSpeed(-1, 100), "negative channel refused without hardware");
+            Assert(!commander.WriteFanSpeed(6, 100), "out-of-range channel refused without hardware");
+            Assert(!commander.WriteFanSpeed(0, -5), "negative RPM refused without hardware");
+            Assert(!commander.WriteFanSpeed(0, 70000), "oversize RPM refused without hardware");
+            Assert(!commander.WriteFanPower(0, 50), "duty write refused without hardware");
+            commander.Dispose();
+
+            // Local test builds are unsigned: the signer helper must report that honestly.
+            string self = typeof(RemoteControlServer).Assembly.Location;
+            Assert(AppUpdateService.GetAuthenticodeThumbprint(self) == null, "unsigned test binary has no signer");
+            Assert(AppUpdateService.GetAuthenticodeThumbprint("Z:\\no\\such\\file.exe") == null,
+                "missing file has no signer");
+        }
+
+        private static async Task CheckDiscoveryResponderAsync()
+        {
+            int beaconPort = GetFreeUdpPort();
+            using (var beacon = new DiscoveryBeacon(5056, true, beaconPort))
+            {
+                beacon.Start();
+                Assert(beacon.IsRunning, "discovery beacon starts on loopback");
+                using (var probe = new UdpClient(0))
+                {
+                    probe.Client.ReceiveTimeout = 3000;
+                    byte[] datagram = Encoding.UTF8.GetBytes("PCUE_DISCOVER");
+                    await probe.SendAsync(datagram, datagram.Length, new IPEndPoint(IPAddress.Loopback, beaconPort));
+                    IPEndPoint from = null;
+                    byte[] reply = probe.Receive(ref from);
+                    string text = Encoding.UTF8.GetString(reply);
+                    Assert(text.Contains("\"app\":\"pCUE\""), "discovery reply identifies pCUE");
+                    Assert(text.Contains("\"requiresToken\":true"), "discovery reply reports token requirement");
+                    Assert(!text.Contains("integration-test-token"), "discovery reply never leaks the token");
+                }
+            }
         }
 
         private sealed class FakeTarget : IRemoteControlTarget, IPwmAcquisitionTarget

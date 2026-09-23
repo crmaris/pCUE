@@ -73,6 +73,18 @@ namespace pCUE.Properties {
 
         [global::System.Configuration.UserScopedSettingAttribute()]
         [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
+        [global::System.Configuration.DefaultSettingValueAttribute("")]
+        public string Update_Signer_Thumbprint {
+            get {
+                return ((string)(this["Update_Signer_Thumbprint"]));
+            }
+            set {
+                this["Update_Signer_Thumbprint"] = value;
+            }
+        }
+
+        [global::System.Configuration.UserScopedSettingAttribute()]
+        [global::System.Diagnostics.DebuggerNonUserCodeAttribute()]
         [global::System.Configuration.DefaultSettingValueAttribute("False")]
         public bool Remote_Enabled {
             get {

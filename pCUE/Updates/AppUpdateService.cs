@@ -77,6 +77,15 @@ namespace pCUE
         public const string DefaultManifestUrl =
             "https://raw.githubusercontent.com/crmaris/powenetics-updates/main/components.json";
 
+        /// <summary>
+        /// Optional Authenticode signer pin (certificate thumbprint, hex, case/space-insensitive).
+        /// Empty (default) means integrity-only: HTTPS + sha256. When set, a verified download must
+        /// ALSO carry an Authenticode signature from exactly this certificate, otherwise it is
+        /// deleted and refused. Pin the release-signing cert here once one exists; until then leave
+        /// empty — requiring a signature nobody produces would brick every update.
+        /// </summary>
+        public string ExpectedSignerThumbprint { get; set; } = "";
+
         /// <summary>This app's key inside the manifest's "apps" map.</summary>
         private const string ProductKey = "pcue";
 
@@ -299,6 +308,26 @@ namespace pCUE
                     info.Sha256.Trim() + ", got " + actual + ".");
             }
 
+            string pin = (ExpectedSignerThumbprint ?? "").Replace(" ", "").Trim();
+            if (pin.Length > 0)
+            {
+                if (progress != null) progress.Report("Verifying signature...");
+                string signer = GetAuthenticodeThumbprint(target);
+                if (signer == null)
+                {
+                    TryDelete(target);
+                    throw new InvalidOperationException(
+                        "The download is unsigned but a signer pin is configured - rejected and deleted.");
+                }
+                if (!signer.Equals(pin, StringComparison.OrdinalIgnoreCase))
+                {
+                    TryDelete(target);
+                    throw new InvalidOperationException(
+                        "Signer mismatch - the download was rejected and deleted. Expected " +
+                        pin + ", got " + signer + ".");
+                }
+            }
+
             if (progress != null) progress.Report("Verified.");
             return target;
         }
@@ -350,6 +379,25 @@ namespace pCUE
             using var sha = SHA256.Create();          // using declarations (C# 8)
             using var stream = File.OpenRead(path);
             return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", string.Empty);
+        }
+
+        /// <summary>
+        /// Thumbprint (no spaces, uppercase) of the Authenticode signing certificate, or null when
+        /// the file is unsigned/unreadable. Signature CHAIN validity is deliberately not checked:
+        /// the sha256 match already proves byte-integrity, so the pin only needs to prove origin.
+        /// </summary>
+        public static string GetAuthenticodeThumbprint(string path)
+        {
+            try
+            {
+                var cert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(path);
+                string thumb = cert.GetCertHashString();
+                return string.IsNullOrWhiteSpace(thumb) ? null : thumb.Replace(" ", "");
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static void TryDelete(string path)

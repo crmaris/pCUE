@@ -83,6 +83,8 @@ namespace pCUE
         private HidStream _stream;
         private Thread _readThread;
         private BenchTachometerOwnership _ownership;
+        private int _readFailures;       // consecutive non-timeout read failures (3 = device lost)
+        private int _reportsSinceFrame;  // reports without a CRLF-terminated frame (desync guard)
         private string _sampleSessionId = Guid.NewGuid().ToString("D");
         private long _sampleSequence;
         private long _sampleTimestamp;
@@ -320,14 +322,23 @@ namespace pCUE
                 {
                     if (_running)
                     {
-                        AppLog.Warn("Tachometer HID read failed: " + ex.Message);
+                        // Debounced removal: a single failed read (USB glitch, suspend/resume) must
+                        // not drop the session; three consecutive failures mean the device is gone.
+                        _readFailures++;
+                        AppLog.Warn("Tachometer HID read failed (" + _readFailures + "/3): " + ex.Message);
                         Debug.WriteLine("pCUE: tach HID read failed: " + ex.Message);
-                        HandleDeviceLost(stream);
+                        if (_readFailures >= 3)
+                        {
+                            HandleDeviceLost(stream);
+                            break;
+                        }
                     }
-                    break;
+                    else break;
+                    continue;
                 }
 
                 if (n <= 0) continue;
+                _readFailures = 0;
                 if (!firstReportLogged) { firstReportLogged = true; LogFirstReport(buffer, n); }
                 // ReadLoop already holds _rxLock; ProcessReport must not re-acquire it (Monitor is
                 // re-entrant, but the nesting hides who owns the session guard). Session check first.
@@ -366,6 +377,17 @@ namespace pCUE
                     if (_hexList.Count > 64)
                         _hexList.RemoveRange(0, _hexList.Count - 64);
 
+                    // Desync recovery: hundreds of reports without a CRLF terminator means the
+                    // stream is garbage or the device speaks a different framing - drop the buffer
+                    // and start over rather than sliding a dead window forever.
+                    if (++_reportsSinceFrame > 500)
+                    {
+                        _hexList.Clear();
+                        _reportsSinceFrame = 0;
+                        AppLog.Warn("Tachometer frame desync; resynchronizing.");
+                        return;
+                    }
+
                     if (_hexList.Count >= 50)
                     {
                         int oaIndex = -1;
@@ -389,6 +411,7 @@ namespace pCUE
                             }
                             rpmDigits = digits;
                             _hexList.Clear();
+                            _reportsSinceFrame = 0;
                         }
                     }
                 }

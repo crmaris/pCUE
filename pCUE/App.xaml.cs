@@ -47,6 +47,16 @@ namespace pCUE
                 catch { args.Handled = false; }
             };
 
+            // Settings migration guard. AssemblyVersion is pinned at 1.1.0.0 precisely so the
+            // settings store never versions out from under the user, which makes this a no-op
+            // today - but if the pin is ever lifted, saved settings migrate instead of resetting
+            // to defaults silently. Never throws: a settings failure must not kill startup.
+            try { pCUE.Properties.Settings.Default.Upgrade(); }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("pCUE: settings upgrade failed: " + ex.Message);
+            }
+
             base.OnStartup(e);
         }
     }

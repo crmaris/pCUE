@@ -72,6 +72,17 @@ namespace pCUE
         //Guards the fan numeric<->slider mirror so a rounding asymmetry can never ping-pong.
         bool syncingFanControls;
 
+        // USB arrival re-enumeration for the Commander PRO (debounced; auto-connect only).
+        bool commanderArrivalSubscribed;
+        int lastCommanderArrivalAttempt;
+
+        // Watchdog: a pool timer that pings the UI thread. If the UI stops answering for 20 s
+        // while an acquisition holds hardware, the lease is revoked (the controller parks output
+        // at zero on its own worker) instead of leaving a driven fan unsupervised.
+        System.Threading.Timer watchdogTimer;
+        int lastUiPingTick;
+        bool watchdogStallReported;
+
         //Min/Max/Avg statistics, computed from real values rather than read back out of the UI.
         //9 series: CPU temp/clock/load + six fan channels.
         readonly RunStatSet stats = new RunStatSet(9);
@@ -284,6 +295,80 @@ namespace pCUE
             {
                 _ = RunUpdateCheck(false);
             }
+
+            // USB re-enumeration: a Commander unplugged and re-plugged while the app runs fires
+            // HidSharp's device-list change; with auto-connect on, retry the open (debounced).
+            // Without auto-connect nothing happens - opening also kills iCUE services, which stays
+            // an explicit user action.
+            try
+            {
+                HidSharp.DeviceList.Local.Changed += CommanderDeviceListChanged;
+                commanderArrivalSubscribed = true;
+            }
+            catch (Exception ex) { Debug.WriteLine("pCUE: Commander arrival subscription failed: " + ex.Message); }
+
+            // Watchdog last: it references only thread-safe state.
+            lastUiPingTick = Environment.TickCount;
+            watchdogTimer = new System.Threading.Timer(WatchdogTick, null, 5000, 5000);
+        }
+
+        private void WatchdogTick(object _)
+        {
+            try
+            {
+                if (Dispatcher == null || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+                try { Dispatcher.BeginInvoke(new Action(delegate { lastUiPingTick = Environment.TickCount; })); }
+                catch { return; }
+                int idleMs = unchecked(Environment.TickCount - lastUiPingTick);
+                if (idleMs < 0 || idleMs <= 20000) { watchdogStallReported = false; return; }
+                if (watchdogStallReported) return;
+                watchdogStallReported = true;
+                AppLog.Error("Watchdog: UI thread unresponsive for " + (idleMs / 1000) +
+                    "s." + (AcquisitionLeased ? " Revoking acquisition to park output at zero." : ""));
+                if (AcquisitionLeased)
+                {
+                    try
+                    {
+                        var revoke = acquisition.RevokeAsync("Watchdog: UI thread stall.");
+                        revoke.ContinueWith(t =>
+                        {
+                            if (t.IsFaulted)
+                                AppLog.Warn("Watchdog revoke failed: " + t.Exception.GetBaseException().Message);
+                        }, TaskScheduler.Default);
+                    }
+                    catch (Exception ex) { AppLog.Warn("Watchdog revoke failed: " + ex.Message); }
+                }
+            }
+            catch { }
+        }
+
+        private void CommanderDeviceListChanged(object sender, HidSharp.DeviceListChangedEventArgs e)
+        {
+            try
+            {
+                // Runs on HidSharp's notification thread: snapshot cheaply, act on the UI thread.
+                if (Corsair_Commander_Connected || AcquisitionLeased) return;
+                if (Dispatcher == null || Dispatcher.HasShutdownStarted || Dispatcher.HasShutdownFinished) return;
+                bool auto = false;
+                try { auto = (bool)Dispatcher.Invoke(new Func<bool>(() => Auto_Connect_CheckBox.IsChecked == true)); }
+                catch { return; }
+                if (!auto) return;
+                int now = Environment.TickCount;
+                if (now - lastCommanderArrivalAttempt < 5000) return;
+                lastCommanderArrivalAttempt = now;
+                Dispatcher.BeginInvoke(new Action(delegate
+                {
+                    try
+                    {
+                        if (Corsair_Commander_Connected || AcquisitionLeased) return;
+                        if (Auto_Connect_CheckBox.IsChecked != true) return;
+                        AppLog.Info("USB device change: retrying Commander PRO open (auto-connect).");
+                        Open_Corsair_Commander_Click(this, null);
+                    }
+                    catch (Exception ex) { AppLog.Warn("Auto-reconnect on USB arrival failed: " + ex.Message); }
+                }));
+            }
+            catch { }
         }
 
         private void Window_Closed(object sender, EventArgs e)
@@ -292,6 +377,12 @@ namespace pCUE
             try { CpuDataTimer.Tick -= CpuDataTimer_Tick; } catch { }
             try { Set_Min_Max_AVG_timer.Stop(); } catch { }
             try { Set_Min_Max_AVG_timer.Tick -= Set_Min_Max_AVG_timer_Tick; } catch { }
+            if (commanderArrivalSubscribed)
+            {
+                try { HidSharp.DeviceList.Local.Changed -= CommanderDeviceListChanged; } catch { }
+                commanderArrivalSubscribed = false;
+            }
+            try { watchdogTimer?.Dispose(); watchdogTimer = null; } catch { }
 
             //stop the closed-loop hold before the HID stream goes away
             StopRpmHold("application closing");
@@ -2190,7 +2281,8 @@ namespace pCUE
                 }
                 else if (a.StartsWith("--remote-token=", StringComparison.OrdinalIgnoreCase))
                 {
-                    Properties.Settings.Default.Remote_Token = a.Substring("--remote-token=".Length);
+                    // Sealed immediately: a later Settings.Save persists the DPAPI form, never plaintext.
+                    Properties.Settings.Default.Remote_Token = ProtectedToken.Protect(a.Substring("--remote-token=".Length));
                     Properties.Settings.Default.Remote_Enabled = true;
                 }
             }
@@ -2206,7 +2298,7 @@ namespace pCUE
 
             //Restore the UI to the saved state, then start the server if it was left enabled.
             Remote_Port_Box.Text = Properties.Settings.Default.Remote_Port.ToString();
-            Remote_Token_Box.Password = Properties.Settings.Default.Remote_Token ?? "";
+            Remote_Token_Box.Password = ProtectedToken.Unprotect(Properties.Settings.Default.Remote_Token);
             Debug_Log_CheckBox.IsChecked = AppLog.Level == LogLevel.Debug;
             Remote_Enable_CheckBox.IsChecked = Properties.Settings.Default.Remote_Enabled;   //fires the handler
         }
@@ -2288,7 +2380,7 @@ namespace pCUE
             Properties.Settings.Default.Remote_Enabled = Remote_Enable_CheckBox.IsChecked == true;
             if (int.TryParse(Remote_Port_Box.Text.Trim(), out int port) && port > 0 && port < 65536)
                 Properties.Settings.Default.Remote_Port = port;
-            Properties.Settings.Default.Remote_Token = Remote_Token_Box.Password ?? "";
+            Properties.Settings.Default.Remote_Token = ProtectedToken.Protect(Remote_Token_Box.Password ?? "");
             Properties.Settings.Default.Save();
 
             ApplyRemoteControlState();
@@ -2646,6 +2738,9 @@ namespace pCUE
             try
             {
                 var progress = new Progress<string>(text => SetUpdateStatus(text, UpdateInfoBrush));
+                // Optional signer pin (empty = integrity-only). Set Update_Signer_Thumbprint once a
+                // release-signing cert exists; then unsigned/wrong-signer downloads are refused.
+                updateService.ExpectedSignerThumbprint = Properties.Settings.Default.Update_Signer_Thumbprint ?? "";
                 installer = await updateService.DownloadVerifiedInstallerAsync(info, progress);
             }
             catch (Exception ex)
@@ -2830,34 +2925,71 @@ namespace pCUE
         }
         #endregion
 
+        private const string AutostartTaskName = "pCUE";
+
         private void Startup(bool add)
         {
-            // HKCU Run with requireAdministrator means Windows prompts for elevation on every
-            // logon ("prompt-start", not silent autostart). A logon scheduled task would avoid
-            // the prompt; kept as Run for now for explicitness - documented, not silent.
+            // Logon scheduled task (highest privileges), NOT the HKCU Run key: Run + the
+            // requireAdministrator manifest means Windows prompts for elevation on EVERY logon
+            // ("prompt-start", not silent autostart). A logon task with /rl highest starts
+            // elevated without a prompt. The legacy Run value is always removed (migration).
             try
             {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(
-                           @"Software\Microsoft\Windows\CurrentVersion\Run", true))
+                try
                 {
-                    if (key == null)
+                    using (RegistryKey key = Registry.CurrentUser.OpenSubKey(
+                               @"Software\Microsoft\Windows\CurrentVersion\Run", true))
                     {
-                        AppLog.Warn("Auto-start registry key not available.");
-                        return;
+                        if (key != null) key.DeleteValue("pCUE", false);
                     }
-                    if (add)
-                    {
-                        //Surround path with " " to make sure that there are no problems
-                        //if path contains spaces.
-                        key.SetValue("pCUE", "\"" + System.Windows.Forms.Application.ExecutablePath + "\"");
-                    }
-                    else
-                        key.DeleteValue("pCUE", false);
+                }
+                catch (Exception ex) { AppLog.Warn("Legacy auto-start cleanup failed: " + ex.Message); }
+
+                if (add)
+                {
+                    string exe = System.Windows.Forms.Application.ExecutablePath;
+                    RunSchtasks("/create /tn \"" + AutostartTaskName + "\" /tr \"\\\"" +
+                        exe + "\\\"\" /sc onlogon /rl highest /f");
+                    AppLog.Info("Auto-start logon task created.");
+                }
+                else
+                {
+                    // Deleting a missing task exits non-zero; that just means "already off".
+                    try { RunSchtasks("/delete /tn \"" + AutostartTaskName + "\" /f"); }
+                    catch (Exception ex) { Debug.WriteLine("pCUE: auto-start task delete: " + ex.Message); }
+                    AppLog.Info("Auto-start logon task removed.");
                 }
             }
             catch (Exception ex)
             {
-                AppLog.Warn("Auto-start registry update failed: " + ex.Message);
+                AppLog.Warn("Auto-start task update failed: " + ex.Message);
+            }
+        }
+
+        private static void RunSchtasks(string args)
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("schtasks.exe", args)
+            {
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            using (System.Diagnostics.Process p = System.Diagnostics.Process.Start(psi))
+            {
+                if (p == null) throw new InvalidOperationException("Could not start schtasks.exe.");
+                if (!p.WaitForExit(15000))
+                {
+                    try { p.Kill(); } catch { }
+                    throw new TimeoutException("schtasks.exe did not finish.");
+                }
+                if (p.ExitCode != 0)
+                {
+                    string detail = "";
+                    try { detail = (p.StandardError.ReadToEnd() + " " + p.StandardOutput.ReadToEnd()).Trim(); }
+                    catch { }
+                    throw new InvalidOperationException("schtasks.exe failed: " + detail);
+                }
             }
         }
 
