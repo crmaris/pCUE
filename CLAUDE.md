@@ -54,9 +54,12 @@ remote protocol integration (incl. new legacy-security checks), CLI parse, both 
 - `artifacts/pCUE_1.6.0_setup.exe` SHA-256 `082ED056DD45DB5D482D1A9390CD1AB17A5C6FD250813512853F100A0E82FD0D`.
 - `artifacts/pCUE_1.6.0_portable.zip` (hash in its `.sha256` sidecar).
 
-Not published: no GitHub Release, no manifest update, no Sound-PC deployment. Bench acceptance
-(descending/retarget/dither, 3-pin rejection, restart read-back, post-Stop honesty) still owed on
-hardware. The public updater feed is unchanged.
+Not published at pack time; published 2026-09-23: commit `867b5b2` + tag `v1.6.0` pushed to
+master, full GitHub Release [v1.6.0](https://github.com/crmaris/pCUE/releases/tag/v1.6.0) with all
+4 assets (setup, portable + sha256 sidecars), and `crmaris/powenetics-updates` `components.json`
+`apps.pcue` moved to 1.6.0 (`082ED056…`, commit `a50a7ab`) — the in-app updater now offers 1.6.0.
+Bench acceptance (descending/retarget/dither, 3-pin rejection, restart read-back, post-Stop
+honesty) still owed on hardware. The public updater feed now points at 1.6.0.
 
 ## 2026-09-23 — three-pin DC and four-pin internal feedback acquisition, packaged 1.5.9
 
