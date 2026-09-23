@@ -110,3 +110,7 @@ foreach ($f in $Files) {
 Write-Host "`nAll files signed and verified." -ForegroundColor Green
 Write-Host "NOTE: any .sha256 written before signing is now stale - signing changes the file." `
            -ForegroundColor Yellow
+Write-Host "NOTE: a standalone-signed setup.exe does NOT update the portable .zip, which still" `
+           -ForegroundColor Yellow
+Write-Host "embeds the unsigned staged exe. Ship a signed .zip only via a signed pack run." `
+           -ForegroundColor Yellow

@@ -4,6 +4,23 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-23 — nit sweep + README + test-stall fix, packaged 1.6.1
+
+Follow-up to the improvement batch (all already on master): GDI+ `try/finally` in `make-icon.ps1`,
+stale-hash + stale-zip warnings in `sign.ps1`, binary markers (`.ico/.exe/.zip/.pfx`) in
+`.gitattributes`, README user docs (DPAPI token, logon-task autostart, signer pin, watchdog,
+auto-reconnect, bench `-DryRun`). HelpWindow Close (`IsCancel` + `Click`) and the layout gate's
+missing window-bounds check are both deliberate patterns, documented in place — no change.
+
+Test fix with a real finding: the acquisition suite flaked twice in `Fixture.Stable()` under load.
+The worker promotes phases async to `Renew()`, so phase assertions now go through `WaitPhase()`
+(terminal Fault/Expired/Released fail fast; otherwise ~10 s stall budget for AV-scan freezes on
+freshly-built exes). 45/45 across 4 consecutive runs after the fix. Gate green via
+`Invoke-LocalCI -NoPack`, then Release-packed:
+
+- `artifacts/pCUE_1.6.1_setup.exe` SHA-256 `318E6BADC6B4C9EEE6192A2AA62C624216F765E1D049967C4AF2EB107296A927`.
+- `artifacts/pCUE_1.6.1_portable.zip` (hash in its `.sha256` sidecar).
+
 ## 2026-09-23 — improvement batch (unreleased, master only)
 
 Offline work only; no hardware calls, no packaging (file version stays 1.6.0), no manifest change.

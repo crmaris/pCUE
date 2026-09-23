@@ -3,6 +3,12 @@
 ###############################################################################
 * text=auto
 
+# Binaries shipped or referenced by this repo: never normalize or merge them.
+*.ico binary
+*.exe binary
+*.zip binary
+*.pfx binary
+
 ###############################################################################
 # Set default behavior for command prompt diff.
 #

@@ -36,6 +36,9 @@ function New-FanBitmap {
 
     $bmp = New-Object System.Drawing.Bitmap($S, $S, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
+    # try/finally: GDI+ handles are process-global and finite - a mid-draw throw must not leak
+    # the bitmap, the graphics context, or the in-flight path/brush (disposed inline below).
+    try {
     $g.SmoothingMode     = 'AntiAlias'
     $g.InterpolationMode = 'HighQualityBicubic'
     $g.PixelOffsetMode   = 'HighQuality'
@@ -120,8 +123,14 @@ function New-FanBitmap {
         $ringPen.Dispose(); $rimPen.Dispose()
     }
 
-    $g.Dispose()
-    return $bmp
+    $result = $bmp
+    $bmp = $null
+    return $result
+    }
+    finally {
+        if ($g -ne $null) { $g.Dispose(); $g = $null }
+        if ($bmp -ne $null) { $bmp.Dispose(); $bmp = $null }
+    }
 }
 
 # --- render every size, then pack them into one ICO -------------------------------------

@@ -136,10 +136,10 @@ internal static class Program
             using (var f = new Fixture()) { f.Lease(); f.Target(10); f.Advance(500, 1000); Interlocked.Exchange(ref f.Clock, 5000); for (int n=0;n<5;n++) f.Renew(); Check(f.Controller.Status.phase != "Stable"); }
         });
         Test("freeze holds duty with fresh RPM supervision", () => {
-            using (var f = new Fixture()) { f.Stable(); Check(f.Send("freeze").ok); int count = f.Hardware.Writes.Count; f.Advance(3000,1005); Check(f.Controller.Status.phase == "Frozen" && f.Hardware.Writes.Count == count); }
+            using (var f = new Fixture()) { f.Stable(); Check(f.Send("freeze").ok); int count = f.Hardware.Writes.Count; f.Advance(3000,1005); Check(f.WaitPhase("Frozen") && f.Hardware.Writes.Count == count); }
         });
         Test("frozen RPM drift revokes and attempts zero", () => {
-            using (var f = new Fixture()) { f.Stable(); f.Send("freeze"); f.Advance(3000,1100); Check(f.Controller.Status.phase == "Fault" && !f.Controller.IsLeased && f.Hardware.Duty == 0); }
+            using (var f = new Fixture()) { f.Stable(); f.Send("freeze"); f.Advance(3000,1100); Check(f.WaitPhase("Fault") && !f.Controller.IsLeased && f.Hardware.Duty == 0); }
         });
         Test("stale sample blocks target before any startup", () => {
             using (var f = new Fixture()) { f.Lease(); f.Sample(100,0, age:2000); Check(!f.Target(10).ok && f.Hardware.Writes.All(v => v == 0) && !f.Controller.IsLeased); }
@@ -218,7 +218,11 @@ internal static class Program
         public void Advance(long time,double rpm) { Sample(time,rpm); Renew(); }
         public PwmAcquisitionResponse Target(double duty) { var r=Request();r.setpoint=duty;return Controller.ExecuteAsync("target",r).Result; }
         public PwmAcquisitionResponse Confirm() { var r=Request();r.operatorName="Bench operator";r.reason="DUT physically powered off at fixture";return Controller.ExecuteAsync("confirm-ambient",r).Result; }
-        public void Stable() { Check(Lease().ok);Check(Target(10).ok);Advance(500,1000);Advance(1000,1000);Advance(1600,1000);Check(Controller.Status.phase=="Stable"); }
+        public void Stable() { Check(Lease().ok);Check(Target(10).ok);Advance(500,1000);Advance(1000,1000);Advance(1600,1000); Check(WaitPhase("Stable")); }
+        // Worker passes run async to Renew(): wait for a phase instead of racing it. Terminal
+        // phases fail fast (a Fault never becomes Stable); otherwise allow up to ~10 s for a
+        // stall - a freshly-built exe can sit in AV scan with its worker frozen on first run.
+        public bool WaitPhase(string phase) { for(int i=0;i<200;i++) { string p=Controller.Status.phase; if(p==phase) return true; if(p=="Fault"||p=="Expired"||p=="Released") return false; Thread.Sleep(50); } return Controller.Status.phase==phase; }
         public void Dispose() { Controller.Dispose(); }
     }
     sealed class FakeHardware : IPwmAcquisitionHardware

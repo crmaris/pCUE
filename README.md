@@ -62,6 +62,8 @@ bench.
 - With the **Token** box empty, pCUE listens on `127.0.0.1` only.
 - Entering a token is what allows access from other machines, and every such request must present
   it. There is deliberately no way to expose fan control on the network unauthenticated.
+- The server token is sealed with Windows DPAPI (current user) before it is saved, so a copied
+  config file cannot be reused on another account or machine.
 
 `GET /` lists the endpoints at runtime.
 
@@ -96,6 +98,29 @@ LAN who is listening — `pcue discover` on its own lists what it finds.
 
 Add `-Json` to any command for raw output. Exit codes are meaningful, so a bench script can tell
 the cases apart: `0` success, `1` pCUE refused the request, `2` no pCUE reachable, `3` bad usage.
+
+## Auto-start, updates, safety nets
+
+- **Auto Start** registers a Windows logon scheduled task (highest privileges), so pCUE starts
+  elevated without a UAC prompt on every logon.
+- **Check for Updates** verifies the download's SHA-256 and always asks twice before installing
+  (download, then launch the installer). Updates are integrity-checked, not signed, unless a
+  signer thumbprint is configured.
+- **Debug log** mirrors diagnostics to `%LOCALAPPDATA%\pCUE\logs` (rotates at 2 MB, one backup kept).
+- A watchdog revokes an active acquisition lease if the UI thread ever stalls, parking fan output
+  at zero instead of leaving driven hardware unsupervised.
+- With **Auto connect** on, pCUE also retries the Commander open when a USB device is
+  plugged in while the app runs.
+
+## Bench validation
+
+`tools/bench-validate.ps1` drives the A/B/D hardware checks over the remote API (3-pin refusal,
+dither descend + live retarget, post-Stop `/status` honesty) and prints C as a manual step:
+
+```powershell
+pwsh tools\bench-validate.ps1 -Server 192.168.1.20 -Token <secret>
+pwsh tools\bench-validate.ps1 -Server 127.0.0.1 -DryRun   # offline: validate + plan only
+```
 
 ## Building
 
