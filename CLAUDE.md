@@ -30,9 +30,25 @@ overlaps), and the Sync WPF control test. Release packaging auto-bumped file ver
 Central Control preflight (server 1.73, Sound-PC Host 1.70) identified device
 `095b908d-f05d-4e5e-8ef1-528bf65016ef` as `DESKTOP-OU4447V`, Online with fresh heartbeat
 and `192.168.1.20`. Its read-only job `ec67f7c8-dc33-4f18-9718-cf6f8ccd117f` confirmed
-`C:\Program Files\pCUE\pCUE.exe` at 1.6.2 with one running instance. Publication and the
-authorized in-place Sound-PC deployment are next; remote pCUE API port 5056 was closed before
-the update, so physical fan behavior has not yet been re-tested on 1.6.3.
+`C:\Program Files\pCUE\pCUE.exe` at 1.6.2 with one running instance. Remote pCUE API port
+5056 was closed before the update.
+
+Published via pCUE PR [#12](https://github.com/crmaris/pCUE/pull/12), merged as `9948c989`,
+and [v1.6.3](https://github.com/crmaris/pCUE/releases/tag/v1.6.3) with all four assets.
+GitHub's installer and portable asset digests matched the local package hashes above. The
+`powenetics-updates` `apps.pcue` feed was updated to 1.6.3 with the release URL and installer
+SHA-256 via [PR #8](https://github.com/crmaris/powenetics-updates/pull/8), merged as `ed0fc191`.
+The GitHub repository API and commit-pinned public raw file confirmed the new values; the
+branch-based raw CDN still served 1.6.2 immediately after merge (a cached response).
+
+Central Control cached the installer as artifact `21151b56-c3d8-4a78-9d59-61d4692c6b8a`.
+The first silent-install job `d0c1578c-727d-4d66-b92b-dcda3d78e1d0` exited 5 and left
+1.6.2 installed. A logged retry, job `eee5dffb-3b67-44ff-afbc-091929b98f91`, succeeded
+with no reboot. Read-only postflight job `98e2941c-d31f-4b5e-ad6e-bcd8152aaef9` verified
+`C:\Program Files\pCUE\pCUE.exe` is 1.6.3 (installed EXE SHA-256
+`66419CD659318AC8806C329EA9424D9586ACE176727162A8EE587D3D5FDBAB0F`). The silent
+installer left pCUE closed; the owner subsequently reported Sound-PC OK. A physical tachometer
+closed-loop RPM match on 1.6.3 has not been measured in this session.
 
 ## 2026-09-23 — CLI e2e + acquisition race fixes (unreleased, master only)
 
