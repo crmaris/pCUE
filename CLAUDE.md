@@ -49,7 +49,10 @@ with no reboot. Read-only postflight job `98e2941c-d31f-4b5e-ad6e-bcd8152aaef9` 
 `C:\Program Files\pCUE\pCUE.exe` is 1.6.3 (installed EXE SHA-256
 `66419CD659318AC8806C329EA9424D9586ACE176727162A8EE587D3D5FDBAB0F`). The silent
 installer left pCUE closed; the owner subsequently reported Sound-PC OK. A physical tachometer
-closed-loop RPM match on 1.6.3 has not been measured in this session.
+closed-loop RPM match on 1.6.3 has not been instrument-logged in this session. When asked
+specifically whether Sync moved all twelve controls and Fan #3 held near 1,000 RPM against the
+external tachometer, the owner replied "all good" after using Sound-PC. This is owner-reported
+bench acceptance, not a captured RPM trace.
 
 ## 2026-09-23 — CLI e2e + acquisition race fixes (unreleased, master only)
 
