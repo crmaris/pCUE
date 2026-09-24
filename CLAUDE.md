@@ -38,8 +38,9 @@ and [v1.6.3](https://github.com/crmaris/pCUE/releases/tag/v1.6.3) with all four 
 GitHub's installer and portable asset digests matched the local package hashes above. The
 `powenetics-updates` `apps.pcue` feed was updated to 1.6.3 with the release URL and installer
 SHA-256 via [PR #8](https://github.com/crmaris/powenetics-updates/pull/8), merged as `ed0fc191`.
-The GitHub repository API and commit-pinned public raw file confirmed the new values; the
-branch-based raw CDN still served 1.6.2 immediately after merge (a cached response).
+The GitHub repository API and commit-pinned public raw file confirmed the new values. The
+branch-based raw CDN briefly served cached 1.6.2 immediately after merge; it then refreshed
+and was verified serving 1.6.3 with the exact installer URL and SHA-256 above.
 
 Central Control cached the installer as artifact `21151b56-c3d8-4a78-9d59-61d4692c6b8a`.
 The first silent-install job `d0c1578c-727d-4d66-b92b-dcda3d78e1d0` exited 5 and left
