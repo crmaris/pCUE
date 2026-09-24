@@ -29,9 +29,32 @@ The repository packer then built the unsigned 1.6.5 package with FileVersion 1.6
 - Staged `pCUE.exe`: 384,000 bytes, SHA-256
   `DB08AF0AF0501C2ABFB5E802040E98BDE78C960B3E30F50CEF9092C3D6219BB9`.
 
-The ZIP contains only the expected five files. Code and version stamp are in draft
-[PR #19](https://github.com/crmaris/pCUE/pull/19) pending merge. Sound-PC installation,
-physical behavior, and public release/feed promotion are pending at the time of this entry.
+The ZIP contains only the expected five files. Code and version stamp were merged through
+[PR #19](https://github.com/crmaris/pCUE/pull/19) as `e4b3da4`; the installed package files
+were copied to the main project's `artifacts/` and re-hashed there. Physical fixed-RPM
+behavior and public release/feed promotion are still pending.
+
+The 1.6.5 Sound-PC upgrade was guarded through CentralControl while the fan was stopped:
+
+- Operator preflight/normal Commander close job `c40c815e-dd25-4772-94a3-3547fe367e74`
+  verified the existing 1.6.4 EXE hash, three distinct fresh internal channel-3 RPM-zero
+  readings (sequences 2210–2212), all six channels at 0 RPM/setpoint, and no active lease.
+  Its close request was accepted; electrical power was not inferred OFF.
+- System stop job `1ba171aa-ce4f-473b-87b8-f35b35b1a8f3` stopped only the same
+  1.6.4 process (PID 9444). Installer job `c354ede3-db5d-4761-9574-1c6de39e7af5`
+  installed the hash-verified 1.6.5 package with exit 0. Postflight job
+  `c33a2139-9f0a-4ca3-9f35-e7092040ce09` verified the installed EXE's 1.6.5
+  FileVersion and staged SHA-256 above, with no pCUE process running.
+- Operator launch job `b1599a0a-09c0-4e68-b292-48088e513690` started installed
+  pCUE 1.6.5 (PID 8104). A first read-only job found it disconnected from Commander;
+  normal reconnect/readback job `5d40fd54-29c8-46fd-b31c-2f1fb8541685` then verified
+  connected Commander, channel 3 in PWM mode, three distinct fresh internal RPM-zero
+  samples (sequences 1–3), all six RPM/setpoints zero, phase Idle, and no active lease.
+  `outputOn` remains unknown; `hardwareFixedRpm=false` before a PWM lease is expected.
+
+No speed target or acoustic capture was issued as part of this installation. The pending
+Noise Auto Testing run will supply physical fixed-RPM evidence. Keep the 1.6.4 package
+as rollback until that validation completes.
 
 ## 2026-09-25 — 1.6.4 release package prepared from merged master
 
