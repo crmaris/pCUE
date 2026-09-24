@@ -91,6 +91,52 @@ internal static class Program
                 Check(stopped.Contains("\"controlMode\":\"percent\"") && stopped.Contains("\"commandedValue\":0") && stopped.Contains("\"outputOn\":null"));
             }
         });
+        Test("fixed RPM remains supervised when percent power readback is unavailable", () => {
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100;
+                f.Hardware.InvalidPowerDuringRpm=true; f.Hardware.InvalidPowerValue=null;
+                Check(f.Lease().ok);
+                var request=f.Request(); request.rpm=1000;
+                Check(f.Controller.ExecuteAsync("target",request).Result.ok);
+                long t=0;
+                for(int i=0;i<12 && f.Controller.Status.phase!="Stable";i++) {
+                    t+=500; f.Advance(t,1000); f.WaitPhase("Stable",100);
+                }
+                Check(f.Controller.Status.phase=="Stable" && f.Hardware.PowerReadsDuringRpm>0);
+                Check(f.Send("freeze").ok);
+                f.Advance(t+500,1000);
+                Check(f.Controller.Status.phase=="Frozen" && f.Hardware.RpmWrites.SequenceEqual(new[]{1000}));
+                Check(f.Send("output-off").ok && f.Hardware.Duty==0 && !f.Hardware.RpmControl);
+            }
+        });
+        Test("fixed RPM rejects a present duty beyond the declared envelope", () => {
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100;
+                f.Hardware.InvalidPowerDuringRpm=true; f.Hardware.InvalidPowerValue=101;
+                Check(f.Lease().ok);
+                var request=f.Request(); request.rpm=1000;
+                f.Controller.ExecuteAsync("target",request).Wait();
+                Check(f.Controller.Status.phase=="Fault" && !f.Controller.IsLeased && f.Hardware.Duty==0);
+            }
+        });
+        Test("unavailable power readback after fixed RPM zero is a fault", () => {
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100; Check(f.Lease().ok);
+                var request=f.Request(); request.rpm=1000;
+                Check(f.Controller.ExecuteAsync("target",request).Result.ok);
+                f.Hardware.PowerRead=()=>null;
+                var result=f.Send("output-off");
+                Check(!result.ok && result.status.phase=="Fault" && !f.Controller.IsLeased);
+            }
+        });
+        Test("percent mode still faults on unavailable power readback", () => {
+            using(var f=new Fixture()) {
+                Check(f.Lease().ok && f.Target(10).ok);
+                f.Hardware.PowerRead=()=>null;
+                f.Renew();
+                Check(f.Controller.Status.phase=="Fault" && !f.Controller.IsLeased);
+            }
+        });
         Test("fixed RPM validates duty envelope and integer target before any write", () => {
             using(var f=new Fixture()) {
                 Check(f.Lease().ok); var r=f.Request(); r.rpm=1000;
@@ -358,22 +404,25 @@ internal static class Program
     sealed class FakeHardware : IPwmAcquisitionHardware
     {
         public bool IsConnected { get; set; }=true; public bool Owned {get;private set;} public int Duty; public bool RejectWrites, RejectRpmWrites;
+        public bool RpmControl, InvalidPowerDuringRpm; public int? InvalidPowerValue; public int PowerReadsDuringRpm;
         public readonly List<int> Writes=new List<int>(), RpmWrites=new List<int>(); object owner; public Action OnRead, BeforeWriteModeCheck; public string DriveMode="pwm";
         public Func<AcquisitionRpm> InternalSample; public Func<int?> PowerRead; public int InternalReads;
         public bool TryAcquireAcquisition(object value) { if(Owned)return false;owner=value;Owned=true;return true; }
         public void ReleaseAcquisition(object value) { if(ReferenceEquals(owner,value)) {Owned=false;owner=null;} }
-        public int? ReadAcquisitionPower(int channel) { OnRead?.Invoke(); return PowerRead == null ? Duty : PowerRead(); }
+        public int? ReadAcquisitionPower(int channel) { OnRead?.Invoke();
+            if(RpmControl) {PowerReadsDuringRpm++; if(InvalidPowerDuringRpm)return InvalidPowerValue;}
+            return PowerRead == null ? Duty : PowerRead(); }
         public string ReadAcquisitionDriveMode(int channel) { return DriveMode; }
         public AcquisitionRpm ReadAcquisitionRpm(int channel) { InternalReads++; return InternalSample(); }
         public bool WriteAcquisitionPower(object value,int channel,int duty,string expectedDriveMode,Func<bool> writeAllowed) {
             if(!ReferenceEquals(owner,value)||RejectWrites)return false;
             if(duty!=0) { BeforeWriteModeCheck?.Invoke(); if(expectedDriveMode!=DriveMode||writeAllowed==null||!writeAllowed())return false; }
-            Writes.Add(duty);Duty=duty;return true;
+            Writes.Add(duty);Duty=duty;RpmControl=false;return true;
         }
         public bool WriteAcquisitionRpm(object value,int channel,int rpm,Func<bool> writeAllowed) {
             if(!ReferenceEquals(owner,value)||DriveMode!="pwm"||RejectRpmWrites||rpm<=0||rpm>65535)return false;
             BeforeWriteModeCheck?.Invoke(); if(DriveMode!="pwm"||writeAllowed==null||!writeAllowed())return false;
-            RpmWrites.Add(rpm);Duty=35;return true;
+            RpmWrites.Add(rpm);Duty=35;RpmControl=true;return true;
         }
     }
 }
