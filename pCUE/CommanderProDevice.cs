@@ -351,7 +351,8 @@ namespace pCUE
             {
                 if (owner == null || !ReferenceEquals(_acquisitionOwner, owner) || _stream == null ||
                     channel < 0 || channel >= FanChannels || rpm <= 0 || rpm > 0xFFFF ||
-                    ReadAcquisitionDriveMode(channel) != "pwm" || writeAllowed == null || !writeAllowed()) return false;
+                    writeAllowed == null || !writeAllowed() || ReadAcquisitionDriveMode(channel) != "pwm" ||
+                    !writeAllowed()) return false;
                 ClearOut(); Array.Clear(_in, 0, _in.Length);
                 _out[1] = (byte)CorsairLightingProtocolConstants.WRITE_FAN_SPEED;
                 _out[2] = (byte)channel;

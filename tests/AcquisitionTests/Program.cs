@@ -372,7 +372,7 @@ internal static class Program
         }
         public bool WriteAcquisitionRpm(object value,int channel,int rpm,Func<bool> writeAllowed) {
             if(!ReferenceEquals(owner,value)||DriveMode!="pwm"||RejectRpmWrites||rpm<=0||rpm>65535)return false;
-            BeforeWriteModeCheck?.Invoke(); if(writeAllowed==null||!writeAllowed())return false;
+            BeforeWriteModeCheck?.Invoke(); if(DriveMode!="pwm"||writeAllowed==null||!writeAllowed())return false;
             RpmWrites.Add(rpm);Duty=35;return true;
         }
     }
