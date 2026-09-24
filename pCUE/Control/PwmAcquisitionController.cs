@@ -284,9 +284,19 @@ namespace pCUE
                 if (!hardware.IsConnected || !FeedbackOwned(driveMode) || !contextReady(channel) ||
                     configuredDriveMode(channel) != driveMode || hardware.ReadAcquisitionDriveMode(channel - 1) != driveMode)
                     throw new InvalidOperationException("Fixture connection, fan drive mode, tach assignment or ownership changed.");
+                // After WRITE_FAN_SPEED the Commander owns duty selection; its percent
+                // readback may be unavailable. Only the active fixed-RPM phases can
+                // tolerate a missing value. A value that is present must stay in the
+                // declared envelope. Percent mode and Off still require exact readback.
                 var actualDuty = hardware.ReadAcquisitionPower(channel - 1);
-                if (!actualDuty.HasValue || (!hardwareRpmMode && actualDuty != commanded) ||
-                    (hardwareRpmMode && (actualDuty < 0 || actualDuty > limits.maximumSetpoint)))
+                bool fixedRpmPoint = hardwareRpmMode && commandedHardwareRpm.HasValue &&
+                    (phase == "Approaching" || phase == "Stable" || phase == "Frozen");
+                if (fixedRpmPoint)
+                {
+                    if (actualDuty.HasValue && (actualDuty < 0 || actualDuty > limits.maximumSetpoint))
+                        throw new InvalidOperationException("Commander fixed-RPM duty exceeded the DUT envelope.");
+                }
+                else if (!actualDuty.HasValue || actualDuty != commanded)
                     throw new InvalidOperationException("Commander duty changed or cannot be verified.");
                 var sample = ReadFeedback(driveMode, channel);
                 if (!Fresh(sample, limits, driveMode) || sample.sampleSessionId != sampleSession) throw new InvalidOperationException("Selected RPM feedback is stale, invalid or belongs to a different connection.");

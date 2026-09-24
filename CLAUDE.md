@@ -4,6 +4,38 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — fixed-RPM duty readback fault and narrow recovery
+
+The first Noise Auto Testing direct-RPM run saved a valid 15-second 5.64 dBA ambient, then
+faulted on the 1000 RPM product target before a product capture. pCUE 1.6.5 reported
+`Commander duty changed or cannot be verified.` after the acknowledged fixed-RPM command;
+the Commander's power-read frame was invalid/unavailable in that mode. The safety cleanup
+returned channel 3 to a fresh 0 RPM/0 percent state and revoked the lease. Electrical output
+state remains unknown; the Noise run journal reported `fixtureReleased=false` because its
+release call arrived after pCUE had already revoked the lease.
+
+The acquisition actor now tolerates an unavailable percent-power readback **only** while an
+acknowledged fixed-RPM target is Approaching, Stable or Frozen. A present power value must
+stay inside the declared DUT envelope. The actor still checks drive mode, exclusive lease,
+fresh same-session Commander RPM, maximum RPM, settle timeout and frozen drift. Percent
+control and every explicit zero/lease/ambient transition retain exact duty readback, so an
+unverified stop cannot be acknowledged. Status reports RPM control, not a verified duty.
+The hardware frame decoder retains its prior null-on-invalid behavior.
+
+Offline `Invoke-LocalCI.ps1 -NoPack` passed with 58 acquisition tests, including unavailable
+fixed-RPM power, present out-of-envelope power, unavailable power after zero and percent
+mode failure, plus 14 RPM-hold tests and remote/CLI/UI/sync checks. Physical 1000/1400 RPM
+validation and public package/feed promotion remain pending.
+
+The repository packer produced unsigned FileVersion 1.6.6 from this fix:
+
+- `artifacts/pCUE_1.6.6_setup.exe`: 2,637,815 bytes; SHA-256
+  `9E4476D74BA3B6259DE98DD321DEC988D3F4C0EC94CED2C8AB65C5D8BDDBD5EB`.
+- `artifacts/pCUE_1.6.6_portable.zip`: 679,061 bytes; SHA-256
+  `C12BF14B80D194B61D31D5EE3CBFBB9631E774693B78C76D06F54C3A9DCCB5A1`.
+- Staged `pCUE.exe`: 384,000 bytes; SHA-256
+  `E9C6CEEB8F6541074D78F5EC47DADEFC01D4B005EC839CFFDD379FDAD0925737`.
+
 ## 2026-09-25 — direct hardware RPM acquisition for four-pin PWM
 
 Protected `/acquisition/target` now sends a whole-number four-pin `rpm` through the
