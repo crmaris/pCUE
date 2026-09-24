@@ -4,6 +4,22 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-23 — CLI e2e + acquisition race fixes (unreleased, master only)
+
+New `scripts/Test-CliE2E.ps1`, wired into local CI: the real CLI against a loopback stub server
+covering all four exit codes (12 checks: status/info/duty/loglevel/shot/401/usage×3/unreachable).
+Two environment lessons recorded in place: the stub runs in a child pwsh PROCESS because
+`Stop-Job` cannot interrupt `HttpListener.GetContext()` here, and the script ends with explicit
+`exit 0` because `$LASTEXITCODE` is session-global while `=` assignments are scope-local (a leaked
+exit 2 failed the gate from inside the `Step` wrapper).
+
+Real race found and fixed in the acquisition suite: the worker's background pass consumes fresh
+sample sequences before a queued `Renew` evaluates them, so fixed `Advance` scripts could stall in
+Approaching forever under load. `Stable()` is now a convergence loop (new sequence per attempt),
+phase assertions go through `WaitPhase()` (terminal phases fail fast, stall budget otherwise), and
+the expiry test's conjuncts are labeled. 45/45 across 10 consecutive runs plus a green full gate
+after the fix. No version bump, no packaging, no manifest change.
+
 ## 2026-09-23 — nit sweep + README + test-stall fix, packaged 1.6.1
 
 Follow-up to the improvement batch (all already on master): GDI+ `try/finally` in `make-icon.ps1`,

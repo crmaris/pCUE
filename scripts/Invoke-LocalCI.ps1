@@ -116,6 +116,11 @@ Step 'Remote protocol integration' {
     # Bench script offline gate: parameter validation + plan without a bench PC.
     & (Join-Path $root 'tools\bench-validate.ps1') -Server 127.0.0.1 -DryRun
     if ($LASTEXITCODE -ne 0) { throw 'bench-validate dry run failed.' }
+
+    # CLI end-to-end: the real CLI against a loopback stub, covering exit codes 0-3.
+    # The script throws on failure and exits 0 on success (its last child pwsh exits 2 by
+    # design, which would otherwise leak session-global $LASTEXITCODE into the gate below).
+    & (Join-Path $root 'scripts\Test-CliE2E.ps1')
 }
 
 Step 'UI layout' {

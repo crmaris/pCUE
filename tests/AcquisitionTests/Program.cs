@@ -154,7 +154,12 @@ internal static class Program
             using (var f = new Fixture()) { f.Lease(); f.Context = false; f.Renew(); Check(!f.Controller.IsLeased && f.Hardware.Duty == 0); }
         });
         Test("lease expiry uses monotonic clock and zero policy", () => {
-            using (var f = new Fixture()) { f.Lease(); f.Target(10); f.Sample(121000,1000); Check(!f.Renew().ok && f.Controller.Status.phase == "Expired" && f.Hardware.Duty == 0 && !f.Hardware.Owned); }
+            using (var f = new Fixture()) { f.Lease(); f.Target(10); f.Sample(121000,1000);
+                var r = f.Renew();
+                Check(!r.ok, "expired renew refused (ok=" + r.ok + ")");
+                Check(f.WaitPhase("Expired", 2000), "phase Expired (phase=" + f.Controller.Status.phase + ")");
+                Check(f.Hardware.Duty == 0, "duty zero (duty=" + f.Hardware.Duty + ")");
+                Check(!f.Hardware.Owned, "ownership released"); }
         });
         Test("ambient is never inferred from PWM zero", () => {
             using (var f = new Fixture()) { f.Lease(); f.Advance(500,0); f.Advance(1500,0); Check(!f.Controller.Status.ambientConfirmed); var json = new JavaScriptSerializer().Serialize(f.Controller.Status); Check(json.Contains("\"confirmedOutputOff\":false") && json.Contains("\"outputOn\":null")); }
@@ -190,6 +195,7 @@ internal static class Program
     }
     static void Test(string name, Action test) { try { test(); passed++; Console.WriteLine("PASS " + name); } catch(Exception ex) { failures++; Console.Error.WriteLine("FAIL " + name + ": " + ex); } }
     static void Check(bool condition) { if(!condition) throw new InvalidOperationException("Assertion failed."); }
+    static void Check(bool condition, string message) { if(!condition) throw new InvalidOperationException("Assertion failed: " + message); }
     sealed class Fixture : IDisposable
     {
         public long Clock; public bool Exclusive=true, Context=true, FailExternal; public int ExternalReads; public string Session="session-one", ConfiguredMode="pwm"; long sequence;
@@ -218,11 +224,33 @@ internal static class Program
         public void Advance(long time,double rpm) { Sample(time,rpm); Renew(); }
         public PwmAcquisitionResponse Target(double duty) { var r=Request();r.setpoint=duty;return Controller.ExecuteAsync("target",r).Result; }
         public PwmAcquisitionResponse Confirm() { var r=Request();r.operatorName="Bench operator";r.reason="DUT physically powered off at fixture";return Controller.ExecuteAsync("confirm-ambient",r).Result; }
-        public void Stable() { Check(Lease().ok);Check(Target(10).ok);Advance(500,1000);Advance(1000,1000);Advance(1600,1000); Check(WaitPhase("Stable")); }
+        public void Stable() {
+            Check(Lease().ok);Check(Target(10).ok);
+            // Convergence loop, not a fixed script: the worker's background pass (every ~100 ms
+            // real time) may observe a fresh sample sequence before the Renew queued for it runs,
+            // consuming that sequence so the Renew's evaluation skips counting. Each extra Advance
+            // supplies a new sequence; three counted evaluations promote to Stable.
+            long t = 0;
+            for (int i = 0; i < 12; i++) {
+                t += 500; Advance(t, 1000);
+                if (WaitPhase("Stable", 1000)) return;
+            }
+            try {
+                var st = Controller.Status;
+                Console.Error.WriteLine("STABLE-DIAG phase=" + st.phase + " fault=" + st.fault +
+                    " leased=" + Controller.IsLeased + " clock=" + Interlocked.Read(ref Clock) +
+                    " writes=" + string.Join(",", Hardware.Writes) + " duty=" + Hardware.Duty +
+                    " extReads=" + ExternalReads);
+            } catch (Exception ex) { Console.Error.WriteLine("STABLE-DIAG failed: " + ex.Message); }
+            Check(false);
+        }
         // Worker passes run async to Renew(): wait for a phase instead of racing it. Terminal
         // phases fail fast (a Fault never becomes Stable); otherwise allow up to ~10 s for a
         // stall - a freshly-built exe can sit in AV scan with its worker frozen on first run.
-        public bool WaitPhase(string phase) { for(int i=0;i<200;i++) { string p=Controller.Status.phase; if(p==phase) return true; if(p=="Fault"||p=="Expired"||p=="Released") return false; Thread.Sleep(50); } return Controller.Status.phase==phase; }
+        // Worker passes run async to Renew(): wait for a phase instead of racing it. Terminal
+        // phases fail fast (a Fault never becomes Stable); otherwise allow a stall budget - a
+        // freshly-built exe can sit in AV scan with its worker frozen on first run.
+        public bool WaitPhase(string phase, int timeoutMs = 10000) { int n = timeoutMs / 50; for(int i=0;i<n;i++) { string p=Controller.Status.phase; if(p==phase) return true; if(p=="Fault"||p=="Expired"||p=="Released") return false; Thread.Sleep(50); } return Controller.Status.phase==phase; }
         public void Dispose() { Controller.Dispose(); }
     }
     sealed class FakeHardware : IPwmAcquisitionHardware
