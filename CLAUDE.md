@@ -4,6 +4,45 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — guarded Sound-PC installation of 1.6.7
+
+After the source/package entry below, the 1.6.7 installer was transferred to Sound-PC
+through CentralControl as `92c62a95-9961-48f5-8be2-9e580dad9bc0`; transfer state
+`Complete` retained the installer SHA-256. Operator preflight/Commander close job
+`507d4eba-ff46-43df-bedc-23ca1d3bb2b4` checked all six fans at zero RPM/setpoint,
+three fresh distinct Commander RPM-zero samples (525–527) on PWM channel 3, no lease,
+and a terminal Noise run. This confirms a stopped fan; it does not prove electrical
+power off.
+
+System install job `dbdcf75c-7795-402f-940b-502cd4bf0ecb` replaced the exact 1.6.6
+process after that guard, installed 1.6.7, and verified the staged EXE SHA-256
+`B57AB1A390B232DC8E714DFB04D74A612BCA74E482F90D129783085343238579`.
+Operator launch job `a9d4855f-1c6a-4ae5-b9c3-dce76cfc10cc` started 1.6.7 as
+PID 12164. Guarded reconnect/readback job `12a09ed6-b0bd-4585-bbad-2c757668ab0d`
+confirmed Commander connection, PWM channel 3, three fresh RPM-zero samples, all six
+setpoints zero, and no active protected lease. No RPM target was sent during this upgrade.
+Acoustic validation then completed in Noise Auto Testing run
+`559f039e-955c-49f5-a835-7f50ae9b6831` (final readback job
+`2cc4548d-bdff-4623-aa43-29609802b520`). The 15-second ambient block was 5.55 dBA,
+quality Valid and saved. At the 1000 RPM target, Commander-internal actual speed averaged
+998.98 RPM; raw LAeq was 29.08 dBA and ambient-corrected LAeq 29.0607 dBA, Valid/saved.
+At the 1400 RPM target, actual speed averaged 1399.26 RPM; raw LAeq was 38.61 dBA and
+corrected LAeq 38.6079 dBA, Valid/saved. The run ended `Completed` with no error,
+analyzer restoration succeeded, and pCUE fixture release succeeded. This confirms
+live fixed-RPM convergence and protected capture at both requested points. The acoustic
+job verified no spectrum/audio artifact for these blocks (reported count zero), so
+those modalities are not implied by this validation.
+
+Source and version stamp were merged through [pCUE PR #22](https://github.com/crmaris/pCUE/pull/22)
+as `9894ff0`. After live validation, [public release v1.6.7](https://github.com/crmaris/pCUE/releases/tag/v1.6.7)
+was published from that commit with setup, portable ZIP and both SHA-256 sidecars.
+An unauthenticated download of the setup asset returned 2,637,905 bytes and SHA-256
+`3E2FF5FEA5D609443E6BDCAF07DD76FB90B71AFDFFB010B11C97F0513BE706CD`.
+The pCUE entry in the shared updater manifest was advanced from 1.6.3 through
+[powenetics-updates PR #9](https://github.com/crmaris/powenetics-updates/pull/9), merged
+as `131eab1`. A fresh read of the anonymous raw `main/components.json` confirmed
+version 1.6.7, the exact release-asset URL, and the same installer SHA-256.
+
 ## 2026-09-25 — fixed-RPM stability reference, 1.6.7 source/package prepared
 
 The 1.6.6 physical fixed-RPM probes showed that a 1400 RPM point could briefly report
