@@ -330,8 +330,15 @@ namespace pCUE
                     // The Commander adjusts PWM duty internally. Observe RPM stability only;
                     // software percent-stepping would fight its fixed-RPM controller.
                     bool atHardwareTarget = targetRpm.HasValue && Math.Abs(targetRpm.Value - actualRpm) <= limits.rpmTolerance;
+                    if (!atHardwareTarget || actualRpm <= 0)
+                    {
+                        // An out-of-target sample cannot anchor a later stability window.
+                        // Otherwise it can first permit Stable and then make another
+                        // in-target sample appear to drift relative to that old anchor.
+                        stableSamples = 0; stableAt = 0; stableReference = null; phase = "Approaching"; return;
+                    }
                     if (!stableReference.HasValue) stableReference = actualRpm;
-                    if (!atHardwareTarget || actualRpm <= 0 || Math.Abs(actualRpm - stableReference.Value) > limits.rpmTolerance)
+                    if (Math.Abs(actualRpm - stableReference.Value) > limits.rpmTolerance)
                     { stableSamples = 0; stableAt = 0; stableReference = actualRpm; phase = "Approaching"; return; }
                     if (stableSamples++ == 0) stableAt = timestamp();
                     if (stableSamples >= 3 && Milliseconds(stableAt) >= limits.stabilityMilliseconds) phase = "Stable";
