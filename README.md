@@ -147,6 +147,17 @@ remains `null` (unknown) and `confirmedOutputOff` remains false. Status for an a
 advertises `capabilities.stoppedPwmAmbient=true` so clients can recognize the supported contract.
 Start/retarget/output-off clears the confirmation.
 
+For a leased four-pin PWM channel, `POST /acquisition/target` with a whole-number `rpm`
+uses the Commander PRO fixed-RPM command directly. The DUT limits must allow up to 100%
+PWM duty because the Commander's own controller chooses duty; the requested RPM must be
+at most the DUT `maximumRpm` and 65535. Status advertises
+`capabilities.hardwareFixedRpm=true` and reports `actuator.controlMode="hardware-rpm"`,
+`unit="rpm"`, and the commanded RPM during approach, stability and frozen capture.
+Fresh internal RPM readings still determine whether the target has settled and remains
+within tolerance. Explicit `setpoint` retains percent control; three-pin `rpm` retains
+the external-tachometer-guided percent loop. Output-off and release command verified
+zero percent and return `controlMode="percent"`, with electrical `outputOn=null`.
+
 ## Credits
 
 Commander PRO protocol details come from the open-source reverse-engineering work in

@@ -343,6 +343,28 @@ namespace pCUE
                 return WriteFanPowerNoLock(channel, duty);
             }
         }
+        // A protected fixed-RPM command uses the Commander's own closed-loop PWM control.
+        // A missing or malformed acknowledgement is never treated as acceptance here.
+        public bool WriteAcquisitionRpm(object owner, int channel, int rpm, Func<bool> writeAllowed)
+        {
+            lock (_ioLock)
+            {
+                if (owner == null || !ReferenceEquals(_acquisitionOwner, owner) || _stream == null ||
+                    channel < 0 || channel >= FanChannels || rpm <= 0 || rpm > 0xFFFF ||
+                    writeAllowed == null || !writeAllowed() || ReadAcquisitionDriveMode(channel) != "pwm" ||
+                    !writeAllowed()) return false;
+                ClearOut(); Array.Clear(_in, 0, _in.Length);
+                _out[1] = (byte)CorsairLightingProtocolConstants.WRITE_FAN_SPEED;
+                _out[2] = (byte)channel;
+                _out[3] = (byte)(rpm >> 8);
+                _out[4] = (byte)(rpm & 0xff);
+                _stream.Write(_out);
+                int read = _stream.Read(_in);
+                if (read < 2 || _in[1] != CorsairLightingProtocolConstants.PROTOCOL_RESPONSE_OK) return false;
+                _lastCommandedDuty[channel] = -1; // Duty now belongs to the Commander firmware.
+                return true;
+            }
+        }
         public int? ReadAcquisitionPower(int channel)
         {
             lock (_ioLock)

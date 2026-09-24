@@ -4,6 +4,35 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — direct hardware RPM acquisition for four-pin PWM
+
+Protected `/acquisition/target` now sends a whole-number four-pin `rpm` through the
+Commander's `WRITE_FAN_SPEED` fixed-RPM command under the active channel lease. It requires
+the PWM DUT envelope to allow 100% duty, enforces the declared maximum RPM and 16-bit
+protocol limit, verifies a strict HID acknowledgement, and observes fresh internal RPM
+samples for stability and frozen capture. An uncertain command attempts verified zero
+duty and retains the lease for safe output-off/release when that succeeds. Status reports
+`hardwareFixedRpm`, `controlMode=hardware-rpm`, `unit=rpm`, and the commanded target;
+zero cleanup returns percent zero with electrical output state unknown. Explicit
+`setpoint` remains percent control; three-pin RPM remains the external-tach software
+percent loop. No bench actuation is included in offline tests.
+
+Source branch: `codex/acquisition-hardware-rpm` (worktree under `.worktrees`).
+Offline `Invoke-LocalCI.ps1 -NoPack` passed on this branch: 54 acquisition checks,
+14 RPM-hold checks, remote protocol/CLI integration, UI layout and sync controls.
+The repository packer then built the unsigned 1.6.5 package with FileVersion 1.6.5:
+
+- `artifacts/pCUE_1.6.5_setup.exe`: 2,637,819 bytes, SHA-256
+  `DCB672E309BF8E16A0D2C41B7D98357976878E9D6ADE25932739FEB7D661072F`.
+- `artifacts/pCUE_1.6.5_portable.zip`: 679,013 bytes, SHA-256
+  `EF7119A64910CC0CEC9429AB39328AFE32C489F90D9028B266073E70A0E76AFD`.
+- Staged `pCUE.exe`: 384,000 bytes, SHA-256
+  `DB08AF0AF0501C2ABFB5E802040E98BDE78C960B3E30F50CEF9092C3D6219BB9`.
+
+The ZIP contains only the expected five files. Code and version stamp are in draft
+[PR #19](https://github.com/crmaris/pCUE/pull/19) pending merge. Sound-PC installation,
+physical behavior, and public release/feed promotion are pending at the time of this entry.
+
 ## 2026-09-25 — 1.6.4 release package prepared from merged master
 
 The stopped-PWM ambient source was merged through [PR #16](https://github.com/crmaris/pCUE/pull/16)

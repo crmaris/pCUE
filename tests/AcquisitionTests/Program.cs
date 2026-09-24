@@ -71,6 +71,73 @@ internal static class Program
                 f.Advance(500,900); Check(f.Hardware.Writes.Count>0 && f.Hardware.Writes.All(v=>v>=10&&v<=60));
             }
         });
+        Test("four-pin RPM target uses Commander fixed RPM and freezes without percent writes", () => {
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100; Check(f.Lease().ok);
+                var request=f.Request(); request.rpm=1000;
+                Check(f.Controller.ExecuteAsync("target",request).Result.ok);
+                Check(f.Hardware.RpmWrites.SequenceEqual(new[]{1000}) && f.Hardware.Writes.Count==0);
+                var starting=new JavaScriptSerializer().Serialize(f.Controller.Status);
+                Check(starting.Contains("\"hardwareFixedRpm\":true") && starting.Contains("\"controlMode\":\"hardware-rpm\"") &&
+                    starting.Contains("\"commandedValue\":1000") && starting.Contains("\"unit\":\"rpm\""));
+                long t=0; for(int i=0;i<12 && f.Controller.Status.phase!="Stable";i++) {t+=500;f.Advance(t,1000);f.WaitPhase("Stable",100);}
+                Check(f.Controller.Status.phase=="Stable"); Check(f.Send("freeze").ok);
+                f.Advance(t+500,1000);
+                var frozen=new JavaScriptSerializer().Serialize(f.Controller.Status);
+                Check(f.Controller.Status.phase=="Frozen" && frozen.Contains("\"commandedValue\":1000") &&
+                    frozen.Contains("\"controlMode\":\"hardware-rpm\"") && f.Hardware.Writes.Count==0);
+                Check(f.Send("output-off").ok && f.Hardware.Duty==0 && f.Hardware.Writes.Last()==0);
+                var stopped=new JavaScriptSerializer().Serialize(f.Controller.Status);
+                Check(stopped.Contains("\"controlMode\":\"percent\"") && stopped.Contains("\"commandedValue\":0") && stopped.Contains("\"outputOn\":null"));
+            }
+        });
+        Test("fixed RPM validates duty envelope and integer target before any write", () => {
+            using(var f=new Fixture()) {
+                Check(f.Lease().ok); var r=f.Request(); r.rpm=1000;
+                Check(!f.Controller.ExecuteAsync("target",r).Result.ok && f.Hardware.RpmWrites.Count==0);
+            }
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100; Check(f.Lease().ok);
+                var r=f.Request(); r.rpm=1000.5;
+                Check(!f.Controller.ExecuteAsync("target",r).Result.ok && f.Hardware.RpmWrites.Count==0);
+            }
+        });
+        Test("uncertain fixed RPM acknowledgement zeroes output and retains lease for release", () => {
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100; Check(f.Lease().ok);
+                f.Hardware.RejectRpmWrites=true; var r=f.Request(); r.rpm=1000;
+                Check(!f.Controller.ExecuteAsync("target",r).Result.ok && f.Controller.IsLeased &&
+                    f.Controller.Status.phase=="Off" && f.Hardware.Writes.Last()==0);
+                Check(f.Send("release").ok && !f.Controller.IsLeased);
+            }
+        });
+        Test("fixed RPM can retarget and switch to explicit percent through verified zero", () => {
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100; Check(f.Lease().ok);
+                var r=f.Request(); r.rpm=900; Check(f.Controller.ExecuteAsync("target",r).Result.ok);
+                r.rpm=950; Check(f.Controller.ExecuteAsync("target",r).Result.ok);
+                Check(f.Hardware.RpmWrites.SequenceEqual(new[]{900,950}));
+                Check(f.Target(20).ok && f.Hardware.Writes.Count>=2 && f.Hardware.Writes[0]==0 &&
+                    f.Hardware.Writes[1]==f.LeaseRequest.limits.startSetpoint && f.Controller.Status.targetRpm==null);
+                var status=new JavaScriptSerializer().Serialize(f.Controller.Status);
+                Check(status.Contains("\"controlMode\":\"percent\"") && status.Contains("\"unit\":\"percent\""));
+            }
+        });
+        Test("fixed RPM final mode fence refuses a changed drive mode", () => {
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100; Check(f.Lease().ok);
+                f.Hardware.BeforeWriteModeCheck=()=>f.Hardware.DriveMode="dc-percent";
+                var r=f.Request(); r.rpm=900;
+                Check(!f.Controller.ExecuteAsync("target",r).Result.ok && f.Hardware.RpmWrites.Count==0 && f.Hardware.Writes.Last()==0);
+            }
+        });
+        Test("three-pin RPM retains software duty loop without hardware RPM", () => {
+            using(var f=new Fixture()) {
+                f.ConfiguredMode=f.Hardware.DriveMode="dc-percent"; f.LeaseRequest.driveMode="dc-percent";
+                Check(f.Lease().ok); var r=f.Request(); r.rpm=900;
+                Check(f.Controller.ExecuteAsync("target",r).Result.ok && f.Hardware.Writes.Count>0 && f.Hardware.RpmWrites.Count==0);
+            }
+        });
         Test("omitted mode retains four-pin-only lease contract", () => {
             using(var f=new Fixture()) { Check(f.Lease().ok && f.Controller.Status.driveMode=="pwm"); }
             using(var f=new Fixture()) { f.ConfiguredMode=f.Hardware.DriveMode="dc-percent"; Check(!f.Lease().ok && f.Hardware.Writes.Count==0); }
@@ -290,8 +357,8 @@ internal static class Program
     }
     sealed class FakeHardware : IPwmAcquisitionHardware
     {
-        public bool IsConnected { get; set; }=true; public bool Owned {get;private set;} public int Duty; public bool RejectWrites;
-        public readonly List<int> Writes=new List<int>(); object owner; public Action OnRead, BeforeWriteModeCheck; public string DriveMode="pwm";
+        public bool IsConnected { get; set; }=true; public bool Owned {get;private set;} public int Duty; public bool RejectWrites, RejectRpmWrites;
+        public readonly List<int> Writes=new List<int>(), RpmWrites=new List<int>(); object owner; public Action OnRead, BeforeWriteModeCheck; public string DriveMode="pwm";
         public Func<AcquisitionRpm> InternalSample; public Func<int?> PowerRead; public int InternalReads;
         public bool TryAcquireAcquisition(object value) { if(Owned)return false;owner=value;Owned=true;return true; }
         public void ReleaseAcquisition(object value) { if(ReferenceEquals(owner,value)) {Owned=false;owner=null;} }
@@ -302,6 +369,11 @@ internal static class Program
             if(!ReferenceEquals(owner,value)||RejectWrites)return false;
             if(duty!=0) { BeforeWriteModeCheck?.Invoke(); if(expectedDriveMode!=DriveMode||writeAllowed==null||!writeAllowed())return false; }
             Writes.Add(duty);Duty=duty;return true;
+        }
+        public bool WriteAcquisitionRpm(object value,int channel,int rpm,Func<bool> writeAllowed) {
+            if(!ReferenceEquals(owner,value)||DriveMode!="pwm"||RejectRpmWrites||rpm<=0||rpm>65535)return false;
+            BeforeWriteModeCheck?.Invoke(); if(DriveMode!="pwm"||writeAllowed==null||!writeAllowed())return false;
+            RpmWrites.Add(rpm);Duty=35;return true;
         }
     }
 }
