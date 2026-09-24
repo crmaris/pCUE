@@ -4,6 +4,26 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — 1.6.4 release package prepared from merged master
+
+The stopped-PWM ambient source was merged through [PR #16](https://github.com/crmaris/pCUE/pull/16)
+as `a7fdd5da`. The repository packaging script rebuilt its clean Release stage from that
+merged tree and auto-bumped `AssemblyFileVersion` from 1.6.3 to 1.6.4; the version stamp is
+tracked in this change. Packages are unsigned and retained locally:
+
+- `artifacts/pCUE_1.6.4_setup.exe`: 2,636,992 bytes, SHA-256
+  `FD554C86BE1E5C7F9149D33F003188902C51CA8A4F89AE5A22BD515DC29A7150`.
+- `artifacts/pCUE_1.6.4_portable.zip`: 677,880 bytes, SHA-256
+  `5BAE8EDFCCF2ED88DBD2977E217A038A0BFDC85619A388A62FBF2F437AE12099`.
+- Staged `pCUE.exe`: FileVersion 1.6.4, SHA-256
+  `202CD69418CBE994B73A2874CBC0958874B07F99EC8E4673204A4AC8B4F2EBBB`.
+
+Both SHA-256 sidecars match. The ZIP contains only the expected five staged files: the app,
+its config, HidSharp, LibreHardwareMonitorLib and NumericUpDownLib. The offline
+`Invoke-LocalCI -NoPack` gate passed before packaging. No pCUE process or fixture on Sound-PC
+was touched for this package. Release-feed promotion and Sound-PC installation are separate
+steps requiring a live bench preflight.
+
 ## 2026-09-25 — explicit energized stopped-PWM ambient basis (source only)
 
 The owner approved a stopped PWM fan as the ambient condition for the current Seasonic
