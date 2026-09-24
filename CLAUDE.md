@@ -24,6 +24,32 @@ its config, HidSharp, LibreHardwareMonitorLib and NumericUpDownLib. The offline
 was touched for this package. Release-feed promotion and Sound-PC installation are separate
 steps requiring a live bench preflight.
 
+Package/version-stamp [PR #17](https://github.com/crmaris/pCUE/pull/17) merged as `d8c580b25f41`.
+The four assets were uploaded to a **draft**, unpublished
+[v1.6.4 release](https://github.com/crmaris/pCUE/releases/tag/untagged-76eaa7b3b67b42d18d72)
+targeting that commit; GitHub's installer/ZIP asset digests match the local hashes above.
+The public update feed remains at 1.6.3.
+
+Guarded Sound-PC installation was completed through CentralControl, leaving pCUE **closed**:
+
+- Read-only Operator gate `37cb0878-efdb-4ca8-84b4-8efb25376efa` returned three fresh pCUE
+  1.6.3 status samples at 2026-09-24 22:17:21/23/24 UTC. All six channels reported 0 RPM and
+  setpoint 0; Commander was connected and RPM hold was off. The active Operator config had no
+  remote token for over 120 seconds, so no protected lease could remain.
+- Normal pCUE Commander-close job `ab23e89a-95c3-4ff0-b75a-f082cdfff700` acknowledged the
+  disconnect; the app refuses this action if an acquisition lease is active. System stop job
+  `3d90ea77-9c0e-4766-aadc-768c8b4b732d` verified the prior installed 1.6.3 EXE hash and
+  stopped its process only after the Commander had disconnected.
+- Installer artifact `bf21024e-4c28-43bb-a7d1-1ba52b4cafa4` deployed in job
+  `1816b296-92e3-4957-beb4-dd050eb5cebb` with exit 0. Postflight job
+  `bbd606cf-3b69-4287-ac45-ab787b7e8142` verified the installed EXE at
+  `C:\Program Files\pCUE\pCUE.exe`: FileVersion 1.6.4, SHA-256
+  `202CD69418CBE994B73A2874CBC0958874B07F99EC8E4673204A4AC8B4F2EBBB`, uninstall
+  DisplayVersion 1.6.4, and zero running pCUE processes.
+
+The package/install is verified, but physical behavior of 1.6.4 is not yet verified. The fan
+was stopped at the last live readings; once pCUE is closed its current duty is not readable.
+
 ## 2026-09-25 — explicit energized stopped-PWM ambient basis (source only)
 
 The owner approved a stopped PWM fan as the ambient condition for the current Seasonic
