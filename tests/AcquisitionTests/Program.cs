@@ -162,10 +162,44 @@ internal static class Program
                 Check(!f.Hardware.Owned, "ownership released"); }
         });
         Test("ambient is never inferred from PWM zero", () => {
-            using (var f = new Fixture()) { f.Lease(); f.Advance(500,0); f.Advance(1500,0); Check(!f.Controller.Status.ambientConfirmed); var json = new JavaScriptSerializer().Serialize(f.Controller.Status); Check(json.Contains("\"confirmedOutputOff\":false") && json.Contains("\"outputOn\":null")); }
+            using (var f = new Fixture()) { Check(new JavaScriptSerializer().Serialize(f.Controller.Status).Contains("\"stoppedPwmAmbient\":false")); f.Lease(); f.Advance(500,0); f.Advance(1500,0); Check(!f.Controller.Status.ambientConfirmed); var json = new JavaScriptSerializer().Serialize(f.Controller.Status); Check(json.Contains("\"confirmedOutputOff\":false") && json.Contains("\"outputOn\":null") && json.Contains("\"stoppedPwmAmbient\":true")); }
         });
         Test("ambient confirmation needs stable zero and records provenance", () => {
-            using (var f = new Fixture()) { f.Lease(); Check(!f.Confirm().ok); f.Advance(500,0); f.Advance(1500,0); Check(f.Confirm().ok && f.Controller.Status.ambientConfirmed); Check(f.Controller.Status.ambientConfirmation.basis == "operator"); f.Target(10); Check(!f.Controller.Status.ambientConfirmed && f.Controller.Status.ambientConfirmation == null); }
+            using (var f = new Fixture()) { f.Lease(); Check(!f.Confirm().ok); f.Advance(500,0); f.Advance(1500,0); Check(f.Confirm().ok && f.Controller.Status.ambientConfirmed); Check(f.Controller.Status.ambientConfirmation.basis == "operator"); Check(new JavaScriptSerializer().Serialize(f.Controller.Status).Contains("\"outputOn\":false")); f.Target(10); Check(!f.Controller.Status.ambientConfirmed && f.Controller.Status.ambientConfirmation == null); }
+        });
+        Test("explicit stopped PWM ambient requires stable zero and keeps electrical state unknown", () => {
+            using (var f = new Fixture()) {
+                Check(f.Lease().ok);
+                Check(!f.ConfirmStoppedPwm().ok); // one fresh zero is insufficient
+                f.Advance(500,0); Check(!f.ConfirmStoppedPwm().ok); // stability span is insufficient
+                f.Advance(1500,0); Check(f.ConfirmStoppedPwm().ok);
+                var status = f.Controller.Status;
+                var json = new JavaScriptSerializer().Serialize(status);
+                Check(status.ambientConfirmed && status.ambientConfirmation.basis == "stopped-pwm-energized");
+                Check(json.Contains("\"commandedValue\":0") && json.Contains("\"outputOn\":null") &&
+                    json.Contains("\"confirmedOutputOff\":false") && json.Contains("\"stoppedPwmAmbient\":true"));
+                Check(f.Target(10).ok && !f.Controller.Status.ambientConfirmed);
+            }
+        });
+        Test("stopped PWM confirmation rejects unknown basis and three-pin drive", () => {
+            using (var f = new Fixture()) {
+                f.Lease(); f.Advance(500,0); f.Advance(1500,0);
+                var request=f.Request(); request.basis="energized"; request.operatorName="Bench operator"; request.reason="Fan stopped";
+                Check(!f.Controller.ExecuteAsync("confirm-ambient",request).Result.ok && !f.Controller.Status.ambientConfirmed);
+            }
+            using (var f = new Fixture()) {
+                f.ConfiguredMode=f.Hardware.DriveMode="dc-percent"; f.LeaseRequest.driveMode="dc-percent";
+                f.Lease(); f.Advance(500,0); f.Advance(1500,0);
+                Check(new JavaScriptSerializer().Serialize(f.Controller.Status).Contains("\"stoppedPwmAmbient\":false"));
+                Check(!f.ConfirmStoppedPwm().ok && !f.Controller.Status.ambientConfirmed);
+            }
+        });
+        Test("stopped PWM confirmation needs a fresh zero-duty readback", () => {
+            using (var f = new Fixture()) {
+                f.Lease(); f.Advance(500,0); f.Advance(1500,0);
+                int reads=0; f.Hardware.PowerRead=()=>++reads == 1 ? 0 : (int?)null;
+                Check(!f.ConfirmStoppedPwm().ok && !f.Controller.Status.ambientConfirmed);
+            }
         });
         Test("ambient confirmation rejects control characters", () => {
             using (var f = new Fixture()) { f.Lease(); f.Advance(500,0); f.Advance(1500,0); var r=f.Request(); r.operatorName="Name\nSpoof"; r.reason="Physically off"; Check(!f.Controller.ExecuteAsync("confirm-ambient",r).Result.ok); }
@@ -224,6 +258,7 @@ internal static class Program
         public void Advance(long time,double rpm) { Sample(time,rpm); Renew(); }
         public PwmAcquisitionResponse Target(double duty) { var r=Request();r.setpoint=duty;return Controller.ExecuteAsync("target",r).Result; }
         public PwmAcquisitionResponse Confirm() { var r=Request();r.operatorName="Bench operator";r.reason="DUT physically powered off at fixture";return Controller.ExecuteAsync("confirm-ambient",r).Result; }
+        public PwmAcquisitionResponse ConfirmStoppedPwm() { var r=Request();r.basis="stopped-pwm-energized";r.operatorName="Bench operator";r.reason="Owner approved energized stopped-PWM ambient";return Controller.ExecuteAsync("confirm-ambient",r).Result; }
         public void Stable() {
             Check(Lease().ok);Check(Target(10).ok);
             // Convergence loop, not a fixed script: the worker's background pass (every ~100 ms
@@ -257,10 +292,10 @@ internal static class Program
     {
         public bool IsConnected { get; set; }=true; public bool Owned {get;private set;} public int Duty; public bool RejectWrites;
         public readonly List<int> Writes=new List<int>(); object owner; public Action OnRead, BeforeWriteModeCheck; public string DriveMode="pwm";
-        public Func<AcquisitionRpm> InternalSample; public int InternalReads;
+        public Func<AcquisitionRpm> InternalSample; public Func<int?> PowerRead; public int InternalReads;
         public bool TryAcquireAcquisition(object value) { if(Owned)return false;owner=value;Owned=true;return true; }
         public void ReleaseAcquisition(object value) { if(ReferenceEquals(owner,value)) {Owned=false;owner=null;} }
-        public int? ReadAcquisitionPower(int channel) { OnRead?.Invoke(); return Duty; }
+        public int? ReadAcquisitionPower(int channel) { OnRead?.Invoke(); return PowerRead == null ? Duty : PowerRead(); }
         public string ReadAcquisitionDriveMode(int channel) { return DriveMode; }
         public AcquisitionRpm ReadAcquisitionRpm(int channel) { InternalReads++; return InternalSample(); }
         public bool WriteAcquisitionPower(object value,int channel,int duty,string expectedDriveMode,Func<bool> writeAllowed) {

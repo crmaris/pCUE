@@ -64,6 +64,9 @@ namespace pCUE
         public string leaseToken { get; set; }
         public double? rpm { get; set; }
         public double? setpoint { get; set; }
+        // Omission retains attended physical-off confirmation. The explicit stopped-PWM
+        // basis records an energized fixture whose fan has independently stopped.
+        public string basis { get; set; }
         public string operatorName { get; set; }
         public string reason { get; set; }
     }

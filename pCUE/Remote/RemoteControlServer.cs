@@ -620,7 +620,7 @@ namespace pCUE
                     "POST /log/clear                  - clear the in-memory log",
                     "GET  /acquisition/status          - exclusive acoustic fixture status (header token required)",
                     "POST /acquisition/lease|renew|target|freeze|output-off|release - supervised acoustic control",
-                    "POST /acquisition/confirm-ambient - recorded physical-off operator confirmation after stable zero RPM",
+                    "POST /acquisition/confirm-ambient - record operator physical-off or explicit stopped-pwm-energized basis after stable zero RPM",
                 },
                 notes = new[]
                 {
