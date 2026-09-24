@@ -23,6 +23,11 @@ after the fix. Packaged 1.6.2:
 - `artifacts/pCUE_1.6.2_setup.exe` SHA-256 `BDB714D8354BC9B174C5E795433A8B0F5CA5AF9D1D6537C6606335FF7ABB3F2F`.
 - `artifacts/pCUE_1.6.2_portable.zip` (hash in its `.sha256` sidecar).
 
+Published 2026-09-23: commit `ecff0d6` + tag `v1.6.2` pushed to master, full GitHub Release
+[v1.6.2](https://github.com/crmaris/pCUE/releases/tag/v1.6.2) with all 4 assets, and
+`components.json` `apps.pcue` moved to 1.6.2 (`BDB714D8…`, commit `27c5ef0`) — the updater now
+offers 1.6.2. Bench hardware acceptance still owed.
+
 ## 2026-09-23 — nit sweep + README + test-stall fix, packaged 1.6.1
 
 Follow-up to the improvement batch (all already on master): GDI+ `try/finally` in `make-icon.ps1`,
