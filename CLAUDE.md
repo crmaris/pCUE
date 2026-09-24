@@ -4,6 +4,36 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — Sync controls corrected, packaged 1.6.3
+
+The Sound-PC owner reported that Sync in the installed 1.6.2 does not move all fan sliders and
+numbers together. The same underlying mirroring defect existed in 1.5.6: the numeric handler only
+updated sliders, the slider handler only updated numbers, and the event guard added by 1.6.0
+prevented either from cascading into the other. `Set Speed` reads the numeric boxes, so its actual
+setpoints could differ from the apparently synchronized sliders.
+
+Sync now copies Fan #1's setpoint to all six numbers and sliders immediately when checked. While
+checked, editing **any** number or slider updates all twelve controls; while unchecked, editing
+one fan only updates its pair. Remote-client edits mark all six setpoints dirty during Sync so
+status refreshes do not undo them. Programmatic remote batch assignments still preserve their six
+independent values. Help and tooltip text reflect this behavior. A new real-WPF, no-hardware
+`scripts/Test-SyncControls.ps1` covers checkbox alignment, Fan #1 and other-fan numeric edits,
+slider edits, and independent editing; it is included in local CI.
+
+`Invoke-LocalCI -NoPack` passed: Debug build with only the four existing HidSharp warnings, 14/14
+RPM-hold tests, 45/45 acquisition tests, remote protocol/CLI checks, both layout checks (zero
+overlaps), and the Sync WPF control test. Release packaging auto-bumped file version to **1.6.3**:
+
+- `artifacts/pCUE_1.6.3_setup.exe` SHA-256 `2AFBA220A3EB3E7783D128756F0FA48036EF8A40392C251B39467CB3A2FE4F68`.
+- `artifacts/pCUE_1.6.3_portable.zip` SHA-256 `A56607A0C3BC63675E8EF7AEAC52016F21FCA30BEC9EA593BB2EDBE2C7AC992E`.
+
+Central Control preflight (server 1.73, Sound-PC Host 1.70) identified device
+`095b908d-f05d-4e5e-8ef1-528bf65016ef` as `DESKTOP-OU4447V`, Online with fresh heartbeat
+and `192.168.1.20`. Its read-only job `ec67f7c8-dc33-4f18-9718-cf6f8ccd117f` confirmed
+`C:\Program Files\pCUE\pCUE.exe` at 1.6.2 with one running instance. Publication and the
+authorized in-place Sound-PC deployment are next; remote pCUE API port 5056 was closed before
+the update, so physical fan behavior has not yet been re-tested on 1.6.3.
+
 ## 2026-09-23 — CLI e2e + acquisition race fixes (unreleased, master only)
 
 New `scripts/Test-CliE2E.ps1`, wired into local CI: the real CLI against a loopback stub server

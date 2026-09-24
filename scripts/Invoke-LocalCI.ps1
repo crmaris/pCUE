@@ -17,7 +17,8 @@
                        "Auto connect", and the Commander "Status:" label on its own value. Each
                        was found by eye, and the battery one was invisible until the moment it
                        mattered. All are the same one-line mistake in absolute margins.
-    4. Release pack  - proves the installer still builds. Skipped with -NoPack, because it bumps
+    4. Sync controls - exercises the real WPF checkbox, numbers and sliders without hardware.
+    5. Release pack  - proves the installer still builds. Skipped with -NoPack, because it bumps
                        the version.
 
 .EXAMPLE
@@ -126,6 +127,10 @@ Step 'Remote protocol integration' {
 Step 'UI layout' {
     # WPF needs an STA thread, which pwsh 7 does not provide, so shell out to Windows PowerShell.
     & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-UiLayout.ps1')
+}
+
+Step 'Sync controls' {
+    & powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'Test-SyncControls.ps1')
 }
 
 if (-not $NoPack) {
