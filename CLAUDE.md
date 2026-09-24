@@ -4,6 +4,59 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — fixed-RPM stability reference, 1.6.7 source/package prepared
+
+The 1.6.6 physical fixed-RPM probes showed that a 1400 RPM point could briefly report
+`Stable` at 1409 RPM, then `Approaching` at 1406 RPM, although both samples were close to
+the requested speed. Source review found an independent stability-reference defect:
+an earlier out-of-target sample can become the reference for later in-target samples.
+For example, 1458 can anchor a 1400 ±50 window; 1409 can then count toward Stable while
+1406 falsely trips a >50 difference from that old 1458 anchor. The change clears the
+reference whenever a sample is outside the target band; the first valid in-band sample
+now starts the window. Genuine out-of-band readings still reset stability.
+
+This is a source-level explanation and reproducible fake-hardware regression, not proof
+that the unseen intermediate 1400 RPM samples in the live probe followed that exact
+sequence. No live hardware actuation or Sound-PC deployment was performed for 1.6.7.
+`Invoke-LocalCI.ps1 -NoPack` passed: 59 acquisition checks including the new anchor
+regression, 14 RPM-hold checks, and remote/CLI/UI/sync gates.
+
+Unsigned FileVersion 1.6.7 package, held pending the acoustic-run outcome:
+
+- `artifacts/pCUE_1.6.7_setup.exe`: 2,637,905 bytes; SHA-256
+  `3E2FF5FEA5D609443E6BDCAF07DD76FB90B71AFDFFB010B11C97F0513BE706CD`.
+- `artifacts/pCUE_1.6.7_portable.zip`: 679,060 bytes; SHA-256
+  `CA7B83706D9F5FAF27504686AC27F2490F827F40BBE43C048F991B37C10D2C05`.
+- Staged `pCUE.exe`: 384,000 bytes; SHA-256
+  `B57AB1A390B232DC8E714DFB04D74A612BCA74E482F90D129783085343238579`.
+
+## 2026-09-25 — 1.6.6 Sound-PC installation and RPM-only probe
+
+PR #21 merged 1.6.6 as `021b58a`. CentralControl installer transfer
+`08dbb3b7-1371-4574-9b76-69a6595f0743` delivered the exact hashed installer to
+Sound-PC. Operator preflight/Commander close job `15af9ca4-6409-437a-94d4-2cfb7375cfda`
+verified all six fan setpoints/RPM zero, three fresh distinct channel-3 RPM-zero samples,
+no protected lease, and terminal Noise run. System install job
+`9d648f13-c0ef-4c4e-9a22-b9ccbd4a6feb` replaced only the installed pCUE process,
+verified 1.6.6 and installed EXE SHA-256
+`E9C6CEEB8F6541074D78F5EC47DADEFC01D4B005EC839CFFDD379FDAD0925737`, and left
+it closed. Operator launch job `face0062-39f9-42f7-aedd-097eb6ed6d43` started PID 14180;
+reconnect job `5c454518-5223-4039-9577-0618fedee623` again verified PWM channel 3,
+three fresh RPM-zero samples, all six setpoints zero, and no lease.
+
+The bounded protected RPM-only probe (no analyzer capture) reached 1000 RPM in 9.33 s,
+then recorded four fresh samples averaging 996.8 RPM (995–998); fixed-RPM control and
+freeze were confirmed. Output-off acknowledged zero percent and release succeeded. The
+script's 1.8-second inter-point wait was shorter than fan coast-down, so it stopped before
+1400; later read-only job `58ebca19-1686-4cc7-9e2a-426a3dc5d2ca` confirmed fresh
+RPM-zero, all six setpoints zero, and no lease. A 1400-only probe reached `Stable` but
+flickered back to `Approaching`; instrumented job
+`9cb9b606-9a03-4d27-b865-9c35126f89f4` observed 1409 RPM (Stable) then 1406 RPM
+(Approaching) on fresh Commander samples. It acknowledged zero percent and release;
+read-only job `99a57813-78b1-4f7d-85dd-3797a40213f9` verified all six fans at
+zero RPM/setpoint and no lease after coast-down. This 1400 point was not accepted as a
+full stable capture. Electrical output state remains unknown at zero duty.
+
 ## 2026-09-25 — fixed-RPM duty readback fault and narrow recovery
 
 The first Noise Auto Testing direct-RPM run saved a valid 15-second 5.64 dBA ambient, then

@@ -109,6 +109,26 @@ internal static class Program
                 Check(f.Send("output-off").ok && f.Hardware.Duty==0 && !f.Hardware.RpmControl);
             }
         });
+        Test("fixed RPM stability starts at the first in-target sample", () => {
+            using(var f=new Fixture()) {
+                f.LeaseRequest.limits.maximumSetpoint=100;
+                f.LeaseRequest.limits.rpmTolerance=50;
+                Check(f.Lease().ok);
+                var request=f.Request(); request.rpm=1400;
+                Check(f.Controller.ExecuteAsync("target",request).Result.ok);
+                f.Advance(500,1458);
+                Check(f.Controller.Status.phase=="Approaching");
+                f.Advance(1000,1409);
+                f.Advance(1500,1409);
+                f.Advance(2100,1409);
+                Check(f.Controller.Status.phase=="Stable");
+                f.Advance(2600,1406);
+                Check(f.Controller.Status.phase=="Stable");
+                f.Advance(3100,1470);
+                Check(f.Controller.Status.phase=="Approaching");
+                Check(f.Send("output-off").ok);
+            }
+        });
         Test("fixed RPM rejects a present duty beyond the declared envelope", () => {
             using(var f=new Fixture()) {
                 f.LeaseRequest.limits.maximumSetpoint=100;
