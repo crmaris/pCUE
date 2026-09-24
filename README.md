@@ -138,6 +138,15 @@ The remote API speaks protocol v2; the acquisition extension (`/acquisition/*`) 
 `X-pCUE-Token` header. The updater reads `apps.pcue` from the shared
 `crmaris/powenetics-updates` manifest over HTTPS with sha256 integrity (not authenticity).
 
+For `POST /acquisition/confirm-ambient`, omitting `basis` retains the attended physical-off
+confirmation (`operator`). An explicitly approved PWM setup can instead send
+`"basis":"stopped-pwm-energized"` with `operatorName` and `reason`. This requires a fresh Commander
+zero-duty readback and at least three distinct fresh zero-RPM readings spanning the configured
+stability time. It marks the fan stopped for ambient collection; the electrical `outputOn` state
+remains `null` (unknown) and `confirmedOutputOff` remains false. Status for an active PWM lease
+advertises `capabilities.stoppedPwmAmbient=true` so clients can recognize the supported contract.
+Start/retarget/output-off clears the confirmation.
+
 ## Credits
 
 Commander PRO protocol details come from the open-source reverse-engineering work in

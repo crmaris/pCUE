@@ -4,6 +4,28 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — explicit energized stopped-PWM ambient basis (source only)
+
+The owner approved a stopped PWM fan as the ambient condition for the current Seasonic
+comparison. `POST /acquisition/confirm-ambient` now accepts optional `basis`; omission retains
+the attended physical-off `operator` basis. The exact `stopped-pwm-energized` value is accepted
+only on a leased PWM channel with Commander-internal RPM feedback. Confirmation requires a fresh
+Commander zero-duty readback, at least three distinct fresh zero-RPM samples across the configured
+stability period, the same feedback session, and a recorded operator name/reason. Unknown bases
+and a DC-percent channel are refused. Active PWM status advertises
+`capabilities.stoppedPwmAmbient=true`; unleased and DC-percent status report false.
+
+For stopped PWM, `ambientConfirmed=true` is a fan-stopped acoustic basis only:
+`actuator.commandedValue=0`, `actuator.outputOn=null` (electrical state unknown), and
+`capabilities.confirmedOutputOff=false`. The old physical-off `operator` basis retains
+`outputOn=false`. Any retarget, output-off, fault, release or RPM movement clears confirmation.
+The protected HTTP protocol test and fake-hardware regression checks cover the new wire value,
+stability, readback, mode restriction and electrical-state honesty. The first isolated-worktree
+Debug build had no NuGet packages; a junction to the repository's already restored pinned
+`packages/` resolved that local setup issue. `Invoke-LocalCI -NoPack` then passed Debug build
+(four existing HidSharp warnings), 14/14 RPM-hold tests, 48/48 acquisition tests, remote
+protocol/CLI, layout and Sync checks. No hardware was opened, actuated or deployed by this change.
+
 ## 2026-09-25 — Sync controls corrected, packaged 1.6.3
 
 The Sound-PC owner reported that Sync in the installed 1.6.2 does not move all fan sliders and

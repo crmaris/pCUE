@@ -184,6 +184,9 @@ namespace pCUE.RemoteProtocolTests
                 await http.PostAsync("/acquisition/lease", new StringContent("{\"operationId\":\"offline-test\",\"driveMode\":\"dc-percent\",\"channel\":2}", Encoding.UTF8, "application/json"));
                 Assert(target.AcquisitionCalls == 2 && target.AcquisitionRequest.driveMode == "dc-percent" &&
                     target.AcquisitionAction == "lease", "three-pin drive mode survives the HTTP boundary");
+                await http.PostAsync("/acquisition/confirm-ambient", new StringContent("{\"operationId\":\"offline-test\",\"basis\":\"stopped-pwm-energized\",\"operatorName\":\"Bench operator\",\"reason\":\"Owner approved\"}", Encoding.UTF8, "application/json"));
+                Assert(target.AcquisitionCalls == 3 && target.AcquisitionRequest.basis == "stopped-pwm-energized" &&
+                    target.AcquisitionAction == "confirm-ambient", "stopped PWM basis survives the HTTP boundary");
             }
         }
 

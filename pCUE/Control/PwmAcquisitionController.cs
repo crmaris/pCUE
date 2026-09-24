@@ -181,14 +181,22 @@ namespace pCUE
                     catch { Terminate("Fault", "Zero duty could not be confirmed; physical fixture attention is required."); throw; }
                     phase = "Off"; targetRpm = null; setpoint = null; frozen = false; ResetStability(); return null;
                 case "confirm-ambient":
+                    string basis = request.basis ?? "operator";
+                    if (basis != "operator" && basis != "stopped-pwm-energized")
+                        throw new ArgumentException("Ambient basis must be operator or stopped-pwm-energized.");
+                    if (basis == "stopped-pwm-energized" && driveMode != "pwm")
+                        throw new InvalidOperationException("Energized stopped-fan ambient confirmation requires a PWM channel with Commander RPM feedback.");
+                    // The cached command is insufficient evidence: query the Commander again
+                    // at the moment of confirmation, in addition to the actor's periodic guard.
+                    int? ambientDuty = hardware.ReadAcquisitionPower(channel - 1);
                     var ambientSample = ReadFeedback(driveMode, channel);
-                    if (phase != "Off" || commanded != 0 || zeroSamples < 3 || Milliseconds(zeroAt) < limits.stabilityMilliseconds ||
+                    if (phase != "Off" || commanded != 0 || ambientDuty != 0 || zeroSamples < 3 || Milliseconds(zeroAt) < limits.stabilityMilliseconds ||
                         !Fresh(ambientSample, limits, driveMode) || ambientSample.value != 0 || ambientSample.sampleSessionId != sampleSession)
                         throw new InvalidOperationException("Confirmed zero duty and distinct fresh stable zero-RPM readings are required.");
                     if (string.IsNullOrWhiteSpace(request.operatorName) || request.operatorName.Length > 80 || request.operatorName.Any(char.IsControl) ||
                         string.IsNullOrWhiteSpace(request.reason) || request.reason.Length > 500 || request.reason.Any(char.IsControl))
-                        throw new ArgumentException("Record the operator name and the physical DUT-off confirmation reason.");
-                    confirmation = new PwmAmbientConfirmation { operatorName = request.operatorName.Trim(), reason = request.reason.Trim(),
+                        throw new ArgumentException("Record the operator name and ambient-basis confirmation reason.");
+                    confirmation = new PwmAmbientConfirmation { basis = basis, operatorName = request.operatorName.Trim(), reason = request.reason.Trim(),
                         confirmedUtc = DateTime.UtcNow.ToString("O"), operationId = operationId, sampleSessionId = sampleSession };
                     return null;
                 case "release":
@@ -264,7 +272,7 @@ namespace pCUE
                 if (phase == "Off")
                 {
                     if (sample.value != 0) { confirmation = null; zeroSamples = 0; zeroAt = 0; }
-                    else if (sample.sampleSequence != zeroSequence)
+                    else if (sample.sampleSequence > zeroSequence)
                     { zeroSequence = sample.sampleSequence.Value; if (zeroSamples++ == 0) zeroAt = timestamp(); }
                     return;
                 }
@@ -381,12 +389,16 @@ namespace pCUE
                 confirmation != null && confirmation.operationId == operationId && confirmation.sampleSessionId == sample.sampleSessionId;
             return new PwmAcquisitionStatus { channel = statusChannel,
                 driveMode = statusMode, phase = phase, targetRpm = targetRpm, fault = fault,
-                capabilities = new { exclusiveLease = true, sensorFreshness = true, supervisedFreeze = true, confirmedOutputOff = false,
+                capabilities = new { exclusiveLease = true, sensorFreshness = true, supervisedFreeze = true,
+                    stoppedPwmAmbient = active && statusMode == "pwm", confirmedOutputOff = false,
                     exclusiveTachOwnership = FeedbackOwned(statusMode), exclusiveFeedbackOwnership = FeedbackOwned(statusMode),
                     feedbackSource = FeedbackSource(statusMode), explicitDriveMode = true },
                 lease = new { active, operationId, owner, expiresUtc = active ? DateTime.UtcNow.AddMilliseconds(Math.Max(0, leaseSeconds * 1000 - Milliseconds(renewedAt))).ToString("O") : null },
-                // outputOn tri-state: false = ambient-confirmed off, true = driving (>0), null = off-but-unverified or unknown.
-                rpm = sample, actuator = new { commandedValue = commanded, unit = "percent", outputOn = ambient ? (bool?)false : commanded > 0 ? (bool?)true : null, frozen, protectionActive = active, ditherActive = false },
+                // outputOn tri-state: false = attended physical-off confirmation, true = driving (>0),
+                // null = unknown electrical state. A stopped PWM fan can still be energized at 0% duty.
+                rpm = sample, actuator = new { commandedValue = commanded, unit = "percent",
+                    outputOn = ambient && confirmation.basis == "operator" ? (bool?)false : commanded > 0 ? (bool?)true : null,
+                    frozen, protectionActive = active, ditherActive = false },
                 ambientConfirmed = ambient, ambientConfirmation = confirmation, observedUtc = DateTime.UtcNow.ToString("O") };
         }
         public void Dispose()
