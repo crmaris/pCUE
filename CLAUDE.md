@@ -4,6 +4,24 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — direct hardware RPM acquisition for four-pin PWM
+
+Protected `/acquisition/target` now sends a whole-number four-pin `rpm` through the
+Commander's `WRITE_FAN_SPEED` fixed-RPM command under the active channel lease. It requires
+the PWM DUT envelope to allow 100% duty, enforces the declared maximum RPM and 16-bit
+protocol limit, verifies a strict HID acknowledgement, and observes fresh internal RPM
+samples for stability and frozen capture. An uncertain command attempts verified zero
+duty and retains the lease for safe output-off/release when that succeeds. Status reports
+`hardwareFixedRpm`, `controlMode=hardware-rpm`, `unit=rpm`, and the commanded target;
+zero cleanup returns percent zero with electrical output state unknown. Explicit
+`setpoint` remains percent control; three-pin RPM remains the external-tach software
+percent loop. No bench actuation is included in offline tests.
+
+Source branch: `codex/acquisition-hardware-rpm` (worktree under `.worktrees`).
+Offline `Invoke-LocalCI.ps1 -NoPack` passed on this branch: 52 acquisition checks,
+14 RPM-hold checks, remote protocol/CLI integration, UI layout and sync controls.
+Package, PR, installation and physical evidence are pending at the time of this entry.
+
 ## 2026-09-25 — 1.6.4 release package prepared from merged master
 
 The stopped-PWM ambient source was merged through [PR #16](https://github.com/crmaris/pCUE/pull/16)

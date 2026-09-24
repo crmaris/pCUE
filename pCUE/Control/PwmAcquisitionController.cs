@@ -36,8 +36,8 @@ namespace pCUE
         private long renewedAt, approachAt, lastWriteAt, stableAt, zeroAt, lastSequence = -1, zeroSequence = -1;
         private int stableSamples, zeroSamples;
         private double? targetRpm, setpoint, stableReference;
-        private int? commanded;
-        private bool frozen, kick;
+        private int? commanded, commandedHardwareRpm;
+        private bool frozen, kick, hardwareRpmMode;
         private string phase = "Idle";
         private PwmAmbientConfirmation confirmation;
         private readonly Func<long> timestamp;
@@ -156,7 +156,8 @@ namespace pCUE
                     operationId = request.operationId; owner = request.owner; originalLease = fingerprint;
                     using (var random = RandomNumberGenerator.Create()) { var bytes = new byte[32]; random.GetBytes(bytes); token = BitConverter.ToString(bytes).Replace("-", ""); }
                     channel = request.channel; driveMode = requestedMode; leaseSeconds = request.leaseSeconds; renewedAt = timestamp();
-                    sampleSession = sample.sampleSessionId; commanded = 0; active = true; phase = "Off"; fault = null;
+                    sampleSession = sample.sampleSessionId; commanded = 0; commandedHardwareRpm = null;
+                    hardwareRpmMode = false; active = true; phase = "Off"; fault = null;
                     confirmation = null; targetRpm = null; setpoint = null; frozen = false; kick = false;
                     ResetStability(); zeroSamples = 0; zeroAt = 0; zeroSequence = -1;
                     return token;
@@ -242,12 +243,31 @@ namespace pCUE
                 (request.rpm.HasValue && (!PwmAcquisitionLimits.Finite(request.rpm.Value) || request.rpm <= 0 || request.rpm > limits.maximumRpm)) ||
                 (request.setpoint.HasValue && (!PwmAcquisitionLimits.Finite(request.setpoint.Value) || request.setpoint != Math.Truncate(request.setpoint.Value) || request.setpoint < limits.minimumSetpoint || request.setpoint > limits.maximumSetpoint)))
                 throw new ArgumentException("Choose one RPM target or whole-percent duty within the DUT limits.");
+            bool directRpm = driveMode == "pwm" && request.rpm.HasValue;
+            if (directRpm && (request.rpm != Math.Truncate(request.rpm.Value) || request.rpm > 0xFFFF || limits.maximumSetpoint != 100))
+                throw new ArgumentException("Four-pin hardware RPM requires a whole RPM at most 65535 and a 100% DUT duty envelope.");
             if (frozen) throw new InvalidOperationException("The output is frozen. End the operating point before retargeting.");
             var feedback = ReadFeedback(driveMode, channel);
             if (!Fresh(feedback, limits, driveMode) || feedback.sampleSessionId != sampleSession)
                 throw new InvalidOperationException("Fresh selected RPM feedback from the leased session is required before changing output.");
+            // A fixed-RPM to explicit-percent transition must exit the Commander's internal
+            // controller first; zero duty is verified before the percent target starts.
+            if (hardwareRpmMode && !directRpm) ForceZero();
             confirmation = null; zeroSamples = 0; targetRpm = request.rpm; setpoint = request.setpoint;
             ResetStability(); approachAt = timestamp(); phase = "Approaching";
+            if (directRpm)
+            {
+                try { WriteHardwareRpm((int)request.rpm.Value); }
+                catch
+                {
+                    // An uncertain HID acknowledgement can still have moved the fan. Attempt
+                    // a verified zero command, but keep the lease for a safe retry/release.
+                    try { ForceZero(); phase = "Off"; targetRpm = null; setpoint = null; }
+                    catch { Terminate("Fault", "Fixed-RPM command failed and zero duty could not be confirmed."); }
+                    throw;
+                }
+                return;
+            }
             if (commanded == 0)
             {
                 kick = limits.kickSetpoint.HasValue;
@@ -265,7 +285,9 @@ namespace pCUE
                     configuredDriveMode(channel) != driveMode || hardware.ReadAcquisitionDriveMode(channel - 1) != driveMode)
                     throw new InvalidOperationException("Fixture connection, fan drive mode, tach assignment or ownership changed.");
                 var actualDuty = hardware.ReadAcquisitionPower(channel - 1);
-                if (!actualDuty.HasValue || actualDuty != commanded) throw new InvalidOperationException("Commander duty changed or cannot be verified.");
+                if (!actualDuty.HasValue || (!hardwareRpmMode && actualDuty != commanded) ||
+                    (hardwareRpmMode && (actualDuty < 0 || actualDuty > limits.maximumSetpoint)))
+                    throw new InvalidOperationException("Commander duty changed or cannot be verified.");
                 var sample = ReadFeedback(driveMode, channel);
                 if (!Fresh(sample, limits, driveMode) || sample.sampleSessionId != sampleSession) throw new InvalidOperationException("Selected RPM feedback is stale, invalid or belongs to a different connection.");
                 if (sample.value > limits.maximumRpm) throw new InvalidOperationException("RPM exceeded the per-DUT limit.");
@@ -292,7 +314,19 @@ namespace pCUE
                 if (sample.sampleSequence == lastSequence || Milliseconds(lastWriteAt) - sample.sampleAgeMs.Value < limits.settleMilliseconds) return;
                 lastSequence = sample.sampleSequence.Value;
                 var actualRpm = sample.value.Value;
-                double desired = setpoint ?? commanded.Value;
+                double desired = setpoint ?? commanded.GetValueOrDefault();
+                if (hardwareRpmMode)
+                {
+                    // The Commander adjusts PWM duty internally. Observe RPM stability only;
+                    // software percent-stepping would fight its fixed-RPM controller.
+                    bool atHardwareTarget = targetRpm.HasValue && Math.Abs(targetRpm.Value - actualRpm) <= limits.rpmTolerance;
+                    if (!stableReference.HasValue) stableReference = actualRpm;
+                    if (!atHardwareTarget || actualRpm <= 0 || Math.Abs(actualRpm - stableReference.Value) > limits.rpmTolerance)
+                    { stableSamples = 0; stableAt = 0; stableReference = actualRpm; phase = "Approaching"; return; }
+                    if (stableSamples++ == 0) stableAt = timestamp();
+                    if (stableSamples >= 3 && Milliseconds(stableAt) >= limits.stabilityMilliseconds) phase = "Stable";
+                    return;
+                }
                 if (targetRpm.HasValue && Math.Abs(targetRpm.Value - actualRpm) > limits.rpmTolerance)
                     desired = commanded.Value + Math.Sign(targetRpm.Value - actualRpm) * limits.maximumStep;
                 var maximumMove = (int)Math.Floor(Math.Min(limits.maximumStep, limits.maximumSlewPerSecond * Milliseconds(lastWriteAt) / 1000));
@@ -352,13 +386,30 @@ namespace pCUE
                 () => active && !disposed && Milliseconds(renewedAt) < leaseSeconds * 1000 &&
                     contextReady(channel) && FeedbackOwned(driveMode) && configuredDriveMode(channel) == driveMode && FeedbackStillFresh()))
                 throw new InvalidOperationException("Commander rejected acquisition drive level, lease expired or fan mode changed.");
+            hardwareRpmMode = false; commandedHardwareRpm = null;
             commanded = value; lastWriteAt = timestamp();
+        }
+        private void WriteHardwareRpm(int rpm)
+        {
+            Expire();
+            if (!active || disposed) throw new InvalidOperationException("Lease ended before the fixed-RPM write.");
+            if (driveMode != "pwm" || rpm <= 0 || rpm > 0xFFFF || rpm > limits.maximumRpm || limits.maximumSetpoint != 100 ||
+                !contextReady(channel) || !FeedbackOwned(driveMode) || configuredDriveMode(channel) != driveMode)
+                throw new InvalidOperationException("Fixed-RPM request is outside the PWM fixture limits.");
+            confirmation = null; zeroSamples = 0;
+            if (!hardware.WriteAcquisitionRpm(hardwareOwner, channel - 1, rpm,
+                () => active && !disposed && Milliseconds(renewedAt) < leaseSeconds * 1000 &&
+                    contextReady(channel) && FeedbackOwned(driveMode) && configuredDriveMode(channel) == driveMode && FeedbackStillFresh()))
+                throw new InvalidOperationException("Commander rejected the fixed-RPM command or the lease changed.");
+            hardwareRpmMode = true; commandedHardwareRpm = rpm; commanded = null; lastWriteAt = timestamp();
         }
         private void ForceZero()
         {
             confirmation = null; zeroSamples = 0; zeroAt = 0; zeroSequence = -1;
             if (!hardware.WriteAcquisitionPower(hardwareOwner, channel - 1, 0, null, null) || hardware.ReadAcquisitionPower(channel - 1) != 0)
-            { commanded = null; throw new InvalidOperationException("Zero duty could not be confirmed. Physically inspect the fixture."); }
+            { hardwareRpmMode = false; commandedHardwareRpm = null; commanded = null;
+                throw new InvalidOperationException("Zero duty could not be confirmed. Physically inspect the fixture."); }
+            hardwareRpmMode = false; commandedHardwareRpm = null;
             commanded = 0; lastWriteAt = timestamp();
         }
         private void Terminate(string state, string reason)
@@ -390,14 +441,15 @@ namespace pCUE
             return new PwmAcquisitionStatus { channel = statusChannel,
                 driveMode = statusMode, phase = phase, targetRpm = targetRpm, fault = fault,
                 capabilities = new { exclusiveLease = true, sensorFreshness = true, supervisedFreeze = true,
-                    stoppedPwmAmbient = active && statusMode == "pwm", confirmedOutputOff = false,
+                    stoppedPwmAmbient = active && statusMode == "pwm", hardwareFixedRpm = active && statusMode == "pwm", confirmedOutputOff = false,
                     exclusiveTachOwnership = FeedbackOwned(statusMode), exclusiveFeedbackOwnership = FeedbackOwned(statusMode),
                     feedbackSource = FeedbackSource(statusMode), explicitDriveMode = true },
                 lease = new { active, operationId, owner, expiresUtc = active ? DateTime.UtcNow.AddMilliseconds(Math.Max(0, leaseSeconds * 1000 - Milliseconds(renewedAt))).ToString("O") : null },
                 // outputOn tri-state: false = attended physical-off confirmation, true = driving (>0),
                 // null = unknown electrical state. A stopped PWM fan can still be energized at 0% duty.
-                rpm = sample, actuator = new { commandedValue = commanded, unit = "percent",
-                    outputOn = ambient && confirmation.basis == "operator" ? (bool?)false : commanded > 0 ? (bool?)true : null,
+                rpm = sample, actuator = new { commandedValue = hardwareRpmMode ? (int?)commandedHardwareRpm : commanded,
+                    unit = hardwareRpmMode ? "rpm" : "percent", controlMode = hardwareRpmMode ? "hardware-rpm" : "percent",
+                    outputOn = ambient && confirmation.basis == "operator" ? (bool?)false : hardwareRpmMode || commanded > 0 ? (bool?)true : null,
                     frozen, protectionActive = active, ditherActive = false },
                 ambientConfirmed = ambient, ambientConfirmation = confirmation, observedUtc = DateTime.UtcNow.ToString("O") };
         }

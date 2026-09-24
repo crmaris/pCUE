@@ -125,6 +125,7 @@ namespace pCUE
         string ReadAcquisitionDriveMode(int channel);
         AcquisitionRpm ReadAcquisitionRpm(int channel);
         bool WriteAcquisitionPower(object owner, int channel, int duty, string expectedDriveMode, Func<bool> writeAllowed);
+        bool WriteAcquisitionRpm(object owner, int channel, int rpm, Func<bool> writeAllowed);
     }
     public interface IPwmAcquisitionTarget
     {
