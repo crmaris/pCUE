@@ -71,6 +71,7 @@ namespace pCUE
 
         //Guards the fan numeric<->slider mirror so a rounding asymmetry can never ping-pong.
         bool syncingFanControls;
+        bool suppressSyncAlignment;
 
         // USB arrival re-enumeration for the Commander PRO (debounced; auto-connect only).
         bool commanderArrivalSubscribed;
@@ -1130,72 +1131,65 @@ namespace pCUE
 
         private void Fan_Numeric_ValueChanged(object sender, RoutedPropertyChangedEventArgs<uint> e)
         {
-            if (syncingFanControls) return;
+            if (syncingFanControls || Fan_Numeric_Boxes == null) return;
             syncingFanControls = true;
             try
             {
                 int changed = Array.IndexOf(Fan_Numeric_Boxes, sender as NumericUpDownLib.UIntegerUpDown);
-                if (remoteSnapshotApplying)
-                {
-                    if (changed >= 0) Fan_Slider[changed].Value = Fan_Numeric_Boxes[changed].Value;
-                    return;
-                }
-                if (IsRemoteMode && changed >= 0) remoteSetpointDirty[changed] = true;
-
-                if (Sync_Fans_CheckBox.IsChecked == true)
-                {
-                    Fan1_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                    Fan2_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                    Fan3_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                    Fan4_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                    Fan5_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                    Fan6_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                }
-                else
-                {
-                    Fan1_Slider.Value = Decimal.ToInt32(Fan1_Numeric.Value);
-                    Fan2_Slider.Value = Decimal.ToInt32(Fan2_Numeric.Value);
-                    Fan3_Slider.Value = Decimal.ToInt32(Fan3_Numeric.Value);
-                    Fan4_Slider.Value = Decimal.ToInt32(Fan4_Numeric.Value);
-                    Fan5_Slider.Value = Decimal.ToInt32(Fan5_Numeric.Value);
-                    Fan6_Slider.Value = Decimal.ToInt32(Fan6_Numeric.Value);
-                }
+                if (changed < 0) return;
+                bool all = !remoteSnapshotApplying && Sync_Fans_CheckBox.IsChecked == true;
+                MirrorFanSetpoint(changed, Fan_Numeric_Boxes[changed].Value, all);
+                MarkRemoteSetpointsDirty(changed, all);
             }
             finally { syncingFanControls = false; }
         }
 
         private void Fan_Slider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            if (syncingFanControls) return;
+            if (syncingFanControls || Fan_Slider == null) return;
             syncingFanControls = true;
             try
             {
                 int changed = Array.IndexOf(Fan_Slider, sender as Slider);
-                if (remoteSnapshotApplying)
-                {
-                    if (changed >= 0) Fan_Numeric_Boxes[changed].Value = Convert.ToUInt32(Fan_Slider[changed].Value);
-                    return;
-                }
-                if (IsRemoteMode && changed >= 0) remoteSetpointDirty[changed] = true;
+                if (changed < 0) return;
+                bool all = !remoteSnapshotApplying && Sync_Fans_CheckBox.IsChecked == true;
+                uint value = Convert.ToUInt32(Fan_Slider[changed].Value);
+                MirrorFanSetpoint(changed, value, all);
+                MarkRemoteSetpointsDirty(changed, all);
+            }
+            finally { syncingFanControls = false; }
+        }
 
-            if (Sync_Fans_CheckBox.IsChecked == true)
+        private void MirrorFanSetpoint(int changed, uint value, bool all)
+        {
+            int first = all ? 0 : changed;
+            int last = all ? Fan_Numeric_Boxes.Length : changed + 1;
+            for (int i = first; i < last; i++)
             {
-                Fan1_Numeric.Value = Convert.ToUInt32(Fan1_Slider.Value);
-                Fan2_Numeric.Value = Convert.ToUInt32(Fan1_Slider.Value);
-                Fan3_Numeric.Value = Convert.ToUInt32(Fan1_Slider.Value);
-                Fan4_Numeric.Value = Convert.ToUInt32(Fan1_Slider.Value);
-                Fan5_Numeric.Value = Convert.ToUInt32(Fan1_Slider.Value);
-                Fan6_Numeric.Value = Convert.ToUInt32(Fan1_Slider.Value);
+                Fan_Numeric_Boxes[i].Value = value;
+                Fan_Slider[i].Value = value;
             }
-            else
+        }
+
+        private void MarkRemoteSetpointsDirty(int changed, bool all)
+        {
+            if (remoteSnapshotApplying || !IsRemoteMode) return;
+            if (all)
             {
-                Fan1_Numeric.Value = Convert.ToUInt32(Fan1_Slider.Value);
-                Fan2_Numeric.Value = Convert.ToUInt32(Fan2_Slider.Value);
-                Fan3_Numeric.Value = Convert.ToUInt32(Fan3_Slider.Value);
-                Fan4_Numeric.Value = Convert.ToUInt32(Fan4_Slider.Value);
-                Fan5_Numeric.Value = Convert.ToUInt32(Fan5_Slider.Value);
-                Fan6_Numeric.Value = Convert.ToUInt32(Fan6_Slider.Value);
+                for (int i = 0; i < remoteSetpointDirty.Length; i++) remoteSetpointDirty[i] = true;
             }
+            else remoteSetpointDirty[changed] = true;
+        }
+
+        private void Sync_Fans_Changed(object sender, RoutedEventArgs e)
+        {
+            if (Fan_Numeric_Boxes == null || remoteSnapshotApplying || suppressSyncAlignment ||
+                Sync_Fans_CheckBox.IsChecked != true) return;
+            syncingFanControls = true;
+            try
+            {
+                MirrorFanSetpoint(0, Fan_Numeric_Boxes[0].Value, true);
+                MarkRemoteSetpointsDirty(0, true);
             }
             finally { syncingFanControls = false; }
         }
@@ -1590,12 +1584,17 @@ namespace pCUE
                 //Populate the six boxes without the local Sync checkbox rewriting each assignment
                 //from Fan #1. Restore Sync immediately; it remains a view/edit convenience.
                 bool sync = Sync_Fans_CheckBox.IsChecked == true;
+                suppressSyncAlignment = true;
                 Sync_Fans_CheckBox.IsChecked = false;
                 try
                 {
                     for (int i = 0; i < 6; i++) Fan_Numeric_Boxes[i].Value = (uint)values[i];
                 }
-                finally { Sync_Fans_CheckBox.IsChecked = sync; }
+                finally
+                {
+                    Sync_Fans_CheckBox.IsChecked = sync;
+                    suppressSyncAlignment = false;
+                }
 
                 StopRpmHold("remote batch setpoints");
                 var rejected = new List<string>();

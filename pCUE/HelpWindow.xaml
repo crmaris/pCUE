@@ -60,7 +60,7 @@
                     and the split is deliberate because no real fan runs below 100 RPM:
                     <LineBreak/>• <Bold>100 or less</Bold> = fan power in <Bold>percent</Bold>.
                     <LineBreak/>• <Bold>Over 100</Bold> = a fixed <Bold>RPM</Bold> target.
-                    <LineBreak/><Bold>Sync</Bold> makes every fan follow fan #1.
+                    <LineBreak/><Bold>Sync</Bold> copies Fan #1's setpoint to all six controls when checked. While checked, changing any fan's number or slider changes all six. Press <Bold>Set Speed</Bold> to apply them.
                 </TextBlock>
                 <TextBlock Style="{StaticResource P}">
                     The drop-down sets how the Commander drives that channel:
