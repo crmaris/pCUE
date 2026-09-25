@@ -4,6 +4,25 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-09-25 — Seasonic PWM endpoint reachability on 1.6.7
+
+After the completed 1000/1400 RPM acoustic run, the owner requested a broader Seasonic
+workbook sweep. Two bounded protected pCUE-only probes established that its low and high
+endpoints are physically reachable before Noise Auto Testing orders that sweep. Each
+probe required a terminal Noise run, all six ordinary fan RPM/setpoints zero, a fresh
+Commander-internal RPM-zero sample on PWM channel 3, and no active lease. Both used
+the 1.6.7 hardware fixed-RPM command, ±40 RPM stability tolerance, 0.5 A stated fan
+limit, bounded approach, four distinct held readings, verified zero-duty stop,
+protected release, and full coast-down to all six RPM-zero. Neither captured sound
+or edited a workbook.
+
+| Target | Operator job | Stable after | Held RPM samples | Mean actual | Cleanup |
+| --- | --- | ---: | --- | ---: | --- |
+| 350 RPM | `d4222c8e-0e50-41fa-bfdf-9bb5faf8b220` | 7.70 s | 341, 349, 349, 348 | 346.8 RPM | zero/release/all stopped |
+| 2100 RPM | `2dfe008d-2f23-4641-b4d1-f0633d109b8b` | 7.17 s | 2100, 2093, 2097, 2097 | 2096.8 RPM | zero/release/all stopped |
+
+Both probes returned no fault. Electrical output state at zero percent remains unknown.
+
 ## 2026-09-25 — guarded Sound-PC installation of 1.6.7
 
 After the source/package entry below, the 1.6.7 installer was transferred to Sound-PC
