@@ -1,5 +1,11 @@
 # pCUE — handover (canonical)
 
+## 2026-10-01 — 1.7.2 publication verified
+
+PR29 source491ea42f784145a4f1da64148750af31b5c29a1a merged into masterb6e1ec16f39ba578384a16aa37dc37cffe1897b9; remote default ancestry and v1.7.2 tag verified. All four public GitHub release downloads equal prepared local bytes. Anonymous installer also matches SHA68B2EA8825E7384849137CE9C00860DB70497262B378118A0A9B8F931E4973C8. Updater feed PR12 merged6e6b1e74a3e18cf349039387a8bd057d96387ffb; anonymous live components.json reports1.7.2 with matching URL/hash and all unrelated entries preserved. Receipt artifacts/validation-1.7.2/publication.json. package.json distinguishes the pre-change build parent from actual source491ea42: pack built those working changes and auto-stamped1.7.2 before source commit. No registered CI route; validated locally as recorded below. No full-app installation or hardware operations.
+
+Shared manifest revision3 matches released Light1.5.0 source7eb48f23cbf1e7d7ff1588d96f68a3d9124b6e34. Final source/conformance handoff delivered to Case's Improve cooler fan automation chat, preserving its arrangement, mappings and test pump100. Case adoption remains pending while v7.15 bench validation is active. Light installation is withheld until a fresh bench release and will use --inventory-only. LINK prior-state restoration remains unverified and writes disabled. Preserve historical recovery-signature evidence and the owner's detached worktree.
+
 ## 2026-10-01 — Shared OCTO/mainboard manual panel, 1.7.2
 
 Added OCTO and actual library-backed motherboard IControl choices to the separate panel, using canonical Light1.5.0 manifest revision3 and unchanged pinned Hid2.1/LHM0.9.4. OCTO supports two layouts, path/report serial, raw selected mode/power capture/restore, guarded paced transfers, bounded verified retries and unselected preservation without flash save. Mainboard uses exact chip/controller/sensor identities, sparse outputs, reported ranges, fractional software recovery and BIOS/default handback. It borrows the application's existing Computer; no second monitor closes process-global Ring0 under CPU telemetry. Pinned board/chip tables can differ from Light0.9.5; software parity is not a claim of every physical board's support.
