@@ -258,7 +258,7 @@ namespace Pcue.Cooling
                 try {
                     if (permitted != null && !permitted()) throw new BeQuietWriteCancelledException();
                     transport.WriteReport(output);
-                    if (evidence != null) evidence("OUT", output, DateTime.UtcNow);
+                    if (evidence != null) evidence("OUT", (byte[])output.Clone(), DateTime.UtcNow);
                     if (!p.Ready.Wait(2000)) throw new TimeoutException("IO Controller acknowledgement timed out.");
                     if (p.Error != null) throw new IOException(p.Error);
                     return p.Response;
@@ -272,7 +272,7 @@ namespace Pcue.Cooling
                 while (!lifetime.IsCancellationRequested) {
                     var data = new byte[65]; int count = transport.ReadReport(data);
                     if (count == 0) throw new EndOfStreamException("IO input ended.");
-                    DateTime utc = DateTime.UtcNow; if (evidence != null) evidence("IN", data, utc);
+                    DateTime utc = DateTime.UtcNow; if (evidence != null) evidence("IN", (byte[])data.Clone(), utc);
                     BeQuietIoReading sample;
                     if (BeQuietIoProtocol.TryDecode(data, count, utc, out sample) && sample.Session == session && sample.CoolerSession == coolerSession)
                         state.Accept(data, count, utc, Stopwatch.GetTimestamp());

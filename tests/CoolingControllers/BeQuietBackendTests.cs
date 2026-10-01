@@ -37,6 +37,28 @@ public static class BeQuietBackendTests
         foreach (int fault in new[] { 1, 2, 3, 4 }) Reject(delegate { using (var wire = new Wire { OpenFault = fault }) using (var client = new BeQuietIoDirectClient(wire, "ABCDEF123456", null)) { } });
         Reject(delegate { using (var wire = new Wire()) using (var client = new BeQuietIoDirectClient(wire, "000000000001", null)) { } });
         using (var wire = new Wire()) using (var client = new BeQuietIoDirectClient(wire, null, null)) { wire.MissingAck = true; Reject(delegate { client.ReadDuty(2); }); Check(client.Error != null && client.Fresh.Length == 0, "Child reply without outer ACK accepted or stale samples retained after timeout."); }
+        var observed = new ConcurrentQueue<string>();
+        using (var wire = new Wire()) using (var client = new BeQuietIoDirectClient(wire, "ABCDEF123456", delegate(string direction, byte[] report, DateTime time) {
+            if (report.Length != 65 || time.Kind != DateTimeKind.Utc) throw new Exception("Invalid raw evidence metadata.");
+            observed.Enqueue(direction); Array.Clear(report, 0, report.Length);
+        })) { Check(client.ReadDuty(1) == 100 && client.Error == null && wire.SetCount == 0, "Report observer mutated live protocol buffers."); }
+        Check(observed.Contains("IN") && observed.Contains("OUT"), "Raw evidence directions missing.");
+        bool evidenceFailed = false;
+        using (var wire = new Wire()) using (var client = new BeQuietIoDirectClient(wire, "ABCDEF123456", delegate(string direction, byte[] report, DateTime time) { if (direction == "OUT" && evidenceFailed) throw new IOException("Evidence storage failed."); }))
+        {
+            evidenceFailed = true; Reject(delegate { client.ReadDuty(1); }); Check(client.Error != null && client.Fresh.Length == 0, "Evidence failure did not invalidate the transport.");
+        }
+        foreach (int floor in new[] { -1, 26 }) Reject(delegate { using (var controller = new BeQuietIoController(new Policy(), false, floor)) { } });
+        var sampleUtc = new DateTime(2026, 10, 1, 20, 0, 0, DateTimeKind.Utc);
+        var telemetry = new Policy { PersistentSamples = new[] { new BeQuietIoReading { Channel = 3, Session = 2, CoolerSession = 3, RawValue = 1, ReceivedUtc = sampleUtc } } };
+        using (var controller = new BeQuietIoController(telemetry, false))
+        {
+            var fresh = controller.Fresh; Check(fresh.Length == 1 && fresh[0].Channel == 3 && fresh[0].Session == 2 && fresh[0].CoolerSession == 3 && fresh[0].RawValue == 1 && fresh[0].ReceivedUtc == sampleUtc && fresh[0].Unit == "Condition", "Snapshot synthesized condition, identity or reception time.");
+            fresh[0].RawValue = 0; Check(telemetry.PersistentSamples[0].RawValue == 1 && controller.Fresh[0].RawValue == 1, "Snapshot changed validated input samples.");
+            Check(telemetry.ReadRequests == 0 && telemetry.Writes.Count == 0 && telemetry.Beats == 0, "Telemetry getter performed USB work.");
+            telemetry.Stale = true; Check(controller.Fresh.Length == 0, "Snapshot retained stale telemetry.");
+            controller.Dispose(); Check(controller.Fresh.Length == 0, "Disposed snapshot retained telemetry.");
+        }
         var fake = new Policy(); using (var controller = new BeQuietIoController(fake, false))
         {
             Reject(delegate { controller.Capture(new[] { false, true }); }); Check(fake.Writes.Count == 0, "Fan-only claim accepted.");
@@ -48,6 +70,7 @@ public static class BeQuietBackendTests
             fake.Writes.Clear(); baseline.Modes[0] = 255; Reject(delegate { controller.Restore(baseline); }); Check(fake.Writes.Count == 0, "Corrupt baseline wrote hardware."); baseline.Modes[0] = 2;
             baseline.ChildSerial = "000000000001"; Reject(delegate { controller.Restore(baseline); }); Check(fake.Writes.Count == 0, "Replacement cooler accepted recovery."); baseline.ChildSerial = fake.CoolerSerial;
             Reject(delegate { controller.Apply(new[] { 24, 60 }, new[] { -1, -1 }, delegate { return true; }); });
+            Reject(delegate { controller.Apply(new[] { 0, 60 }, new[] { -1, -1 }, delegate { return true; }); });
             Reject(delegate { controller.Apply(new[] { 50, 60 }, new[] { -1, -1 }, delegate { return fake.Writes.Count == 0; }); }); Check(fake.Writes.SequenceEqual(new[] { "pump=100" }), "Late stop allowed subsequent writes."); controller.Restore(baseline);
         }
         foreach (int fault in new[] { 0, 1, 2 })
@@ -62,15 +85,57 @@ public static class BeQuietBackendTests
             }
         }
         fake = new Policy { Stale = true }; using (var controller = new BeQuietIoController(fake, false)) { Check(!controller.Read().Writable, "Missing sensor marked controllable."); Reject(delegate { controller.Capture(new[] { true, true }); }); }
+        fake = new Policy(); using (var controller = new BeQuietIoController(fake, false, 10))
+        {
+            Reject(delegate { controller.Apply(new[] { 9, 60 }, new[] { -1, -1 }, delegate { return true; }); }); Check(fake.Writes.Count == 0, "Configured lower floor wrote below its range.");
+            controller.Apply(new[] { 10, 60 }, new[] { -1, -1 }, delegate { return true; }); Check(fake.Pump == 10 && fake.Fan == 60, "Explicit lower floor rejected its boundary.");
+        }
+        fake = new Policy { PumpRpm = 0 }; using (var controller = new BeQuietIoController(fake, false, 0))
+        {
+            Check(!controller.Read().Writable, "Uncommanded zero RPM became healthy."); Reject(delegate { controller.Apply(new[] { 0, 60 }, new[] { -1, -1 }, delegate { return true; }); }); Check(fake.Writes.Count == 0, "Uncommanded zero RPM allowed a first write.");
+        }
+        fake = new Policy(); using (var controller = new BeQuietIoController(fake, false, 0))
+        {
+            var baseline = controller.Capture(new[] { true, true });
+            controller.Apply(new[] { 0, 60 }, new[] { -1, -1 }, delegate { return true; }); Check(fake.Writes.SequenceEqual(new[] { "pump=100", "fan=60", "mode=1", "pump=0" }), "Explicit zero command lost pump-first sequence.");
+            fake.PumpRpm = 0; fake.Writes.Clear(); Check(controller.Read().Writable, "Verified zero duty rejects fresh stopped feedback.");
+            controller.Tick(); controller.Apply(new[] { 0, 60 }, new[] { 0, 60 }, delegate { return true; }); Check(fake.Writes.Count == 0 && fake.Beats == 1, "Verified stopped pump is repeatedly kicked or parked.");
+            controller.Apply(new[] { 100, 60 }, new[] { 0, 60 }, delegate { return true; }); Check(fake.Pump == 100, "Stopped pump cannot be restarted."); Check(!controller.Read().Writable, "Positive duty retained permission for zero RPM.");
+            fake.PumpRpm = 2900; controller.Restore(baseline); Check(fake.Pump == 100 && fake.Fan == 48 && fake.Mode == 0, "Zero policy changed recovery pump100/bank/mode.");
+        }
+        foreach (int fault in new[] { 0, 1, 2, 3, 4, 5, 6 })
+        {
+            fake = new Policy(); using (var controller = new BeQuietIoController(fake, false, 0))
+            {
+                var baseline = controller.Capture(new[] { true, true }); bool alive = true;
+                controller.Apply(new[] { 0, 60 }, new[] { -1, -1 }, delegate { return alive; }); fake.PumpRpm = 0; fake.Writes.Clear();
+                if (fault == 0) alive = false; else if (fault == 1) fake.Stale = true; else if (fault == 2) fake.Condition = 1; else if (fault == 3) fake.MissingPump = true; else if (fault == 4) fake.Mode = 0; else if (fault == 5) fake.Pump = 20; else fake.PumpRpm = -1;
+                controller.Tick(); Check(fake.Pump == 100 && fake.Fan == 100 && fake.Mode == 1, "Stopped policy suppressed a lease/feedback/settings fault park.");
+                Check(!controller.Read().Writable, "Stopped policy failed to latch a trip.");
+                controller.Restore(baseline); Check(fake.Pump == 100 && fake.Fan == 48 && fake.Mode == 0, "Stopped policy lost recovery with bad telemetry.");
+            }
+        }
+        fake = new Policy { IgnoreZero = true }; using (var controller = new BeQuietIoController(fake, false, 0))
+        {
+            Reject(delegate { controller.Apply(new[] { 0, 60 }, new[] { -1, -1 }, delegate { return true; }); });
+            fake.PumpRpm = 0; Check(!controller.Read().Writable, "Failed zero readback authorizes stopped feedback."); controller.Tick(); Check(fake.Pump == 100 && fake.Fan == 100, "Partial zero sequence suppresses full-speed park.");
+        }
+        fake = new Policy(); using (var controller = new BeQuietIoController(fake, false, 0))
+        {
+            controller.Apply(new[] { 0, 60 }, new[] { -1, -1 }, delegate { return true; }); fake.PumpRpm = 0; fake.Writes.Clear();
+            Reject(delegate { controller.Apply(new[] { 0, 70 }, new[] { 0, 60 }, delegate { return fake.Writes.Count == 0; }); });
+            Check(fake.Writes.SequenceEqual(new[] { "pump=100" }), "Stopped-pump update continued after cancellation.");
+            fake.Pump = 0; Check(!controller.Read().Writable, "Cancelled sequence retained its old zero-feedback permission.");
+        }
         Console.WriteLine("PASS: " + checks + " shared be quiet protocol/policy checks (simulated; no USB hardware).");
     }
     sealed class Policy : IBeQuietControlClient
     {
-        public int Pump = 100, Fan = 48, Mode, Condition, Beats; public bool Stale; public List<string> Writes = new List<string>();
+        public int Pump = 100, Fan = 48, Mode, Condition, Beats, PumpRpm = 2900, ReadRequests; public bool Stale, MissingPump, IgnoreZero; public BeQuietIoReading[] PersistentSamples; public List<string> Writes = new List<string>();
         public string Error { get { return null; } } public string CoolerSerial { get { return "ABCDEF123456"; } } public string FirmwareVersion { get { return "0.0.37"; } }
-        public BeQuietIoReading[] Fresh { get { return Stale ? new BeQuietIoReading[0] : new[] { new BeQuietIoReading { Channel = 0, RawValue = 325 }, new BeQuietIoReading { Channel = 1, RawValue = 2900 }, new BeQuietIoReading { Channel = 2, RawValue = 1000 }, new BeQuietIoReading { Channel = 3, RawValue = Condition } }; } }
-        public void Heartbeat() { Beats++; } public void Status() { } public int ReadDuty(int channel) { return channel == 1 ? Pump : Fan; } public int ReadCoolingMode() { return Mode; }
-        public void SetDuty(int channel, int value, Func<bool> permitted = null) { if (permitted != null && !permitted()) throw new BeQuietWriteCancelledException(); if (channel == 1) Pump = value; else Fan = value; Writes.Add((channel == 1 ? "pump=" : "fan=") + value); }
+        public BeQuietIoReading[] Fresh { get { return Stale ? new BeQuietIoReading[0] : PersistentSamples ?? new[] { new BeQuietIoReading { Channel = 0, RawValue = 325 }, new BeQuietIoReading { Channel = 1, RawValue = PumpRpm }, new BeQuietIoReading { Channel = 2, RawValue = 1000 }, new BeQuietIoReading { Channel = 3, RawValue = Condition } }.Where(x => !MissingPump || x.Channel != 1).ToArray(); } }
+        public void Heartbeat() { Beats++; } public void Status() { } public int ReadDuty(int channel) { ReadRequests++; return channel == 1 ? Pump : Fan; } public int ReadCoolingMode() { ReadRequests++; return Mode; }
+        public void SetDuty(int channel, int value, Func<bool> permitted = null) { if (permitted != null && !permitted()) throw new BeQuietWriteCancelledException(); if (channel == 1) { if (!IgnoreZero || value != 0) Pump = value; } else Fan = value; Writes.Add((channel == 1 ? "pump=" : "fan=") + value); }
         public void SetSoftwareControl(bool enabled, Func<bool> permitted = null) { if (permitted != null && !permitted()) throw new BeQuietWriteCancelledException(); Mode = enabled ? 1 : 0; Writes.Add("mode=" + Mode); } public void Dispose() { }
     }
     sealed class Wire : IBeQuietReportTransport
