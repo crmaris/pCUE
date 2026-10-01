@@ -1,5 +1,11 @@
 # pCUE — handover (canonical)
 
+## 2026-10-01 — Case benchmark finished; adoption review still local
+
+Latest direct human messages in Case release the former benchmark freeze and authorize that chat to update the app after its own checks. Its AMD results review remains priority. This follow-up must not independently operate the bench or repeat the completed Light1.5.0 installation. Case bench/share7.16 is the last verified deployment; await a fresh handover before claiming a newer version.
+
+Case production matches all10 manifest4 source/test hashes. Its local evidence records62 CORE/153 IO/3281 peripherals,36 application recovery/selection checks,101 OEM integration checks and14 shared font/theme previews. The missing-saved-device/exact IO bridge-child/MI00 review has source fixes/tests; final visible-selector/profile-guidance checks and merged Case source remain pending. New UI skill lesson was copied identically to Codex/Claude, SHA B14C00ED043DE661F8E7218E160085D0A6C59751C81704CF65E7EC057A0EFA9C. Receipt artifacts/validation-shared-revision4/case-progress.json. No full-app release/version/feed/installation/hardware change here; source remains PR32/master1c010db4ed640e49e3798d5e53b77783247a9293. Three-app runtime-source parity is still pending; LINK writes stay disabled.
+
 ## 2026-10-01 — Shared revision4 Case adapter dependencies, source only
 
 Copied canonical Light revision4 source/tests byte-identically: explicit IO minimumPumpDuty0–25 (default25), optional cloned raw-report observer preserved on exact reconnect, and cloned Fresh telemetry preserving real ReceivedUtc/session IDs/condition without polling USB. Case explicitly requires manual0–100; full and Light retain their old constructor/default25 and existing UI floors. Fresh zero RPM is allowed only after this owner's verified pump0/software-mode command; stale/missing/error feedback, wrong settings/mode, positive-duty zero and partial/cancelled/failed commands still fault/park. Recovery always leaves pump100. Physical0–24 response/stop is unverified.
