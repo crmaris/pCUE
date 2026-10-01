@@ -1,5 +1,11 @@
 # pCUE — handover (canonical)
 
+## 2026-10-02 — Case v7.19 receipts and corrected shared-controller UI
+
+Case's own local release evidence confirms v7.19 installed20:58:16Z and update-share published20:59:30Z on October1. PackageSHA256 7F544175114DFE1973FB833C4AEE980EBCAD96EC57D1EF072ED1C899073078CD; installedEXESHA256 0F72AEDE341F830CBA59E79FA629BFE985AA55F34B00E53D19702483326B178F. Case is finishing live UI checks and its final source publication remains pending. This read-only follow-up performed no bench/share operation, edited no Case checkout and did not repeat Light installation.
+
+All10 canonical revision4 source/test hashes match full/Light/Case production. Case compiles actual shared GUI/CLI/recovery adapters; atomic recovery before writes, live cancellation/epoch guards, failed recovery ownership, exact learned child/mapping and pump100 test/recovery behavior were reviewed. Retained evidence records62/153/3281 conformance assertions,36 Case adapter/recovery checks,101 production integration checks and14 corrected shared font/theme views with no hardware. Largest previews were inspected and the selector/profile-guidance findings are resolved. Receipt: artifacts/validation-shared-revision4/case-v719-review.json. Final merged Case source/validation handover is required before closing supported three-app runtime-source parity. Full1.7.2/Light1.5.0 release bytes stay immutable; Light installation stays complete; LINK writes remain disabled. No new physical controller/pump0–24 validation is claimed.
+
 ## 2026-10-01 — Case benchmark finished; adoption review still local
 
 Latest direct human messages in Case release the former benchmark freeze and authorize that chat to update the app after its own checks. Its AMD results review remains priority. This follow-up must not independently operate the bench or repeat the completed Light1.5.0 installation. Case bench/share7.16 is the last verified deployment; await a fresh handover before claiming a newer version.
