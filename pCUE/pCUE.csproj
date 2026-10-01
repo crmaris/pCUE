@@ -115,6 +115,9 @@
       <SubType>Code</SubType>
     </Compile>
     <Compile Include="CommanderProDevice.cs" />
+    <Compile Include="CoolingControllersWindow.cs" />
+    <Compile Include="..\shared\CorsairCore.cs"><Link>Shared\CorsairCore.cs</Link></Compile>
+    <Compile Include="..\shared\CoolingUsbDiscovery.cs"><Link>Shared\CoolingUsbDiscovery.cs</Link></Compile>
     <Compile Include="CorsairLightingProtocolConstants.cs" />
     <Compile Include="Control\FanRpmHoldController.cs" />
     <Compile Include="Control\PwmAcquisitionModels.cs" />

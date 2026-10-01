@@ -1,0 +1,17 @@
+{
+  "revision": 1,
+  "files": [
+    {
+      "name": "CorsairCore.cs",
+      "sha256": "CAB9EC63D03A4F7F1B6AB04DB188A7BC3B8FEAA7890BF4DF3DE3D39A1FAC7F3C"
+    },
+    {
+      "name": "CoolingUsbDiscovery.cs",
+      "sha256": "2E8BB249774F544BB23D6B624AECAB634CBF9409F2BC0535D0680B7435A4AE22"
+    },
+    {
+      "name": "CoreBackendTests.cs",
+      "sha256": "7ECD5C707BDF68E1A05BEB6909ECD7124492C195796899AC28D321392B51CE8F"
+    }
+  ]
+}

@@ -89,6 +89,13 @@ Step 'Build (Debug)' {
     try { if (Test-Path $buildLog) { Remove-Item $buildLog -Force } } catch { }
 }
 
+Step 'Shared cooling controller conformance and UI preview (no hardware)' {
+    & (Join-Path $root 'shared\Test-SharedSource.ps1') -Root $root
+    & $msbuild (Join-Path $root 'tests\CoolingControllers\CoolingControllers.csproj') /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo
+    if ($LASTEXITCODE -ne 0) { return }
+    & (Join-Path $root 'tests\CoolingControllers\bin\Debug\pCUE.CoolingControllerTests.exe') (Join-Path $root 'artifacts\cooling-ui')
+}
+
 Step 'Tachometer and RPM hold regression tests (no hardware)' {
     & $msbuild (Join-Path $root 'tests\RpmHoldTests\RpmHoldTests.csproj') /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo
     if ($LASTEXITCODE -ne 0) { return }

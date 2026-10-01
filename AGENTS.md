@@ -12,6 +12,9 @@ Most critical facts (full detail in `CLAUDE.md`):
   MSBuild task) — don't hand-edit it. C# 12 on .NET Framework 4.8 (no nullable-reference annotations).
 - Fan numeric box: **≤100 = PWM power %** (whole-percent only, hardware limit), **>100 = fixed RPM**.
 - External bench tachometer (VID 0x1A86/PID 0xE008) support lives in `pCUE/Tachometer/HidTachometer.cs`.
+- CORE/XT live in the separate cooling panel and shared MIT driver. Read COOLING-CONTROLLERS.md and shared/README.md; keep source and conformance hashes identical across Light/full/Case Tests. These new paths are experimental, percentage-only, and must not expand/replace the Commander PRO six-channel acquisition/remote contract. Run scripts/Invoke-LocalCI.ps1 -NoPack before a single release pack.
+
+Owner correction: scheduled workspace cleanup is retired. Clean only scratch created in this session; do not age-prune existing owner material or recreate scheduled deletion. The historical section below is superseded.
 
 ## Workspace hygiene (owner directive 2026-09-04)
 
