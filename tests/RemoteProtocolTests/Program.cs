@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -247,6 +248,39 @@ namespace pCUE.RemoteProtocolTests
             Assert(AppUpdateService.GetAuthenticodeThumbprint(self) == null, "unsigned test binary has no signer");
             Assert(AppUpdateService.GetAuthenticodeThumbprint("Z:\\no\\such\\file.exe") == null,
                 "missing file has no signer");
+            CheckAuthenticodeTampering();
+        }
+
+        private static void CheckAuthenticodeTampering()
+        {
+            // PowerShell 7 is a local-CI dependency with an embedded signature. Windows
+            // PowerShell may be catalog-only signed, unlike the installers being verified.
+            string programFiles = Environment.GetEnvironmentVariable("ProgramW6432") ?? Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string original = Path.Combine(programFiles, "PowerShell", "7", "pwsh.exe");
+            if (!File.Exists(original)) original = (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';')
+                .Select(p => Path.Combine(p.Trim('"'), "pwsh.exe")).FirstOrDefault(File.Exists);
+            string signer = AppUpdateService.GetAuthenticodeThumbprint(original);
+            Assert(!string.IsNullOrEmpty(signer), "trusted embedded-signed PowerShell executable retains its verified signer");
+            var root = new DirectoryInfo(AppDomain.CurrentDomain.BaseDirectory);
+            while (root != null && !File.Exists(Path.Combine(root.FullName, "pCUE.sln"))) root = root.Parent;
+            Assert(root != null, "signature tests run within the repository");
+            string scratch = Path.Combine(root.FullName, ".codex-tmp", "signature-test-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(scratch);
+            try
+            {
+                byte[] bytes = File.ReadAllBytes(original);
+                int pe = BitConverter.ToInt32(bytes, 0x3c);
+                int section = pe + 24 + BitConverter.ToUInt16(bytes, pe + 20);
+                int code = BitConverter.ToInt32(bytes, section + 20);
+                bytes[code + 32] ^= 1;
+                string copy = Path.Combine(scratch, "modified-signed-copy.exe"); File.WriteAllBytes(copy, bytes);
+                // Preserve the certificate to reproduce the old pin bypass. Never execute the copy.
+                using (var cert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(copy))
+                    Assert(cert.GetCertHashString() == signer, "tampered fixture still embeds the expected certificate");
+                Assert(AppUpdateService.GetAuthenticodeThumbprint(copy) == null, "modified signed executable is rejected despite its matching embedded certificate");
+                Console.WriteLine("Authenticode checks: trusted signer accepted; modified signature rejected (copied executable never run).");
+            }
+            finally { Directory.Delete(scratch, true); }
         }
 
         private static async Task CheckDiscoveryResponderAsync()

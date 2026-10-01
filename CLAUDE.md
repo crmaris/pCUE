@@ -4,6 +4,50 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-10-01 — Recovery reconnect and verified installer signer, 1.7.0
+
+Fixed both findings from the owner's code review. CORE/XT polling, apply and restore failures
+release the failed connection, retain the original recovery record and block further manual
+writes. Stop / restore retries by reopening only the exact saved device. A close/dispose failure
+cannot leave the dead handle as the next recovery target. Successful restore alone removes the
+record, and unselected settings remain preserved. The existing selected-output 100% fallback
+attempt remains in the feedback-loss path before releasing the connection.
+
+Configured updater signer pins now require successful Windows Authenticode verification and
+the certificate from that verified signer. Extracting an embedded certificate alone no longer
+authenticates an installer. Verification uses cached Windows trust with no UI/network retrieval;
+unsigned, modified, untrusted, catalog-only and unreadable files are rejected when a pin is set.
+An empty pin still permits the existing HTTPS/SHA256-only unsigned release flow.
+
+`Invoke-LocalCI.ps1 -NoPack` passed with the unchanged four-warning baseline, 62 shared checks,
+14 RPM-hold tests, 59 acquisition tests, remote/CLI, layout and Sync/interlock checks. New hidden
+WPF recovery tests cover USB loss, failed reopen/restore, disposal failure, exact saved identity,
+unchanged recovery bytes and preservation of an unselected change. The signer regression accepts
+the trusted embedded signature on installed PowerShell 7, modifies only a scratch copy while
+preserving its certificate, and rejects that altered signature. The copied executable was never
+run. The same positive/negative check passed against the packaged Release helper. No live USB,
+normal app launch, installation or bench/thermal/electrical validation was performed.
+
+A single Release pack auto-bumped FileVersion to **1.7.0**; AssemblyVersion remains **1.1.0.0**.
+The seven ZIP payload files match the clean stage and both SHA256 sidecars match:
+
+- `artifacts/pCUE_1.7.0_setup.exe` (unsigned, 2,653,053 bytes):
+  `3FC43CFCC8FEDAB288364BEA61280B323F4AEC4305BECD7BE870C55F30EF4571`.
+- `artifacts/pCUE_1.7.0_portable.zip` (698,087 bytes):
+  `DC610C7017D32945C8E523AF054A93E8EBC9828F3173326849F2A5D278277E42`.
+- Packaged EXE: `CBDA66003E00FCF6BC54E3ED7F65E711D2971DB0ED3CA489306E0944AB8419E6`.
+
+Retained `artifacts/validation-1.7.0-recovery-signature/` contains local-ci.log, pack.log,
+packaged-signature.log, package.json and illustrative cooling-ui PNGs. Own scratch, copied test
+executables and duplicate worktree staging/packages were cleaned before this handover entry.
+Shared protocol/discovery/conformance files are unchanged and byte-identical to committed
+pCUE Light `3a740a1` and its revision-1 manifest. Light's uncommitted be quiet draft currently
+differs; its cross-app adoption remains with that task and was not copied into this fix.
+The owner's active `feature/shared-bequiet` checkout and update-guard edits were preserved by
+using `.worktrees/recovery-signature`. GX10 preflight had rejected the current AI Check context;
+Codex performed the fix without another route, service change or additional agent. No GitHub
+workflow exists for this repository, so validation is local only. Publication evidence follows.
+
 ## 2026-10-01 — Shared CORE/XT percentage panel, 1.6.9
 
 Added a separate **Cooling controllers** panel for CORE (1B1C:0C1C, EXT + six fans) and CORE XT (0C2A, six fans). Metadata discovery selects one device automatically or asks for a choice among several, remembering its exact identity. Explicit Connect reads settings/RPM; fresh outputs stay unchecked. Fan/Pump and manual percentages have per-output limits; Pump defaults to 100% and minimum 60%, configurable. Atomic recovery precedes writes, selected values are merged/read back, and Stop/close restores captured settings. Failed restore keeps the panel/record available. Parent/update close and PRO open are blocked while the panel owns a session. Original six-channel PRO fixed-RPM/tach/acquisition/remote/CLI behavior remains separate.

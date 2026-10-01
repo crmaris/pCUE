@@ -104,8 +104,10 @@ the cases apart: `0` success, `1` pCUE refused the request, `2` no pCUE reachabl
 - **Auto Start** registers a Windows logon scheduled task (highest privileges), so pCUE starts
   elevated without a UAC prompt on every logon.
 - **Check for Updates** verifies the download's SHA-256 and always asks twice before installing
-  (download, then launch the installer). Updates are integrity-checked, not signed, unless a
-  signer thumbprint is configured.
+  (download, then launch the installer). A configured signer thumbprint additionally requires a
+  valid embedded Authenticode signature trusted by Windows and the verified signer's exact
+  certificate. Signature verification uses the local Windows trust cache. With an empty pin,
+  unsigned releases remain protected by HTTPS and the manifest checksum only.
 - **Debug log** mirrors diagnostics to `%LOCALAPPDATA%\pCUE\logs` (rotates at 2 MB, one backup kept).
 - A watchdog revokes an active acquisition lease if the UI thread ever stalls, parking fan output
   at zero instead of leaving driven hardware unsupervised.
