@@ -46,7 +46,17 @@ differs; its cross-app adoption remains with that task and was not copied into t
 The owner's active `feature/shared-bequiet` checkout and update-guard edits were preserved by
 using `.worktrees/recovery-signature`. GX10 preflight had rejected the current AI Check context;
 Codex performed the fix without another route, service change or additional agent. No GitHub
-workflow exists for this repository, so validation is local only. Publication evidence follows.
+workflow exists for this repository, so validation is local only.
+
+Source and the auto-generated version stamp were published through
+[PR #26](https://github.com/crmaris/pCUE/pull/26), merged as
+`1519cacf86e010f87a83e92eee136f093ce1d8b0`; source commit
+`495b7df30da133940c8e109cfb19efeee340af1f` is verified in remote `master`.
+The merged source branch was deleted. Installer/portable remain prepared locally at the paths
+above; this session did not change public release assets, the updater feed or an installed app.
+The lean, clean `.worktrees/recovery-signature` checkout retains the merged fix while the owner's
+original checkout continues its uncommitted be quiet/update-guard work. Merge these fixes into
+that feature branch before its next pack, to avoid superseding them or reusing FileVersion 1.7.0.
 
 ## 2026-10-01 — Shared CORE/XT percentage panel, 1.6.9
 
