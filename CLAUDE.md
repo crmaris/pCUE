@@ -4,13 +4,74 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
-## 2026-10-01 — Shared native be quiet pair and updater guards, 1.7.0
+## 2026-10-01 — Combined shared IO/recovery/signature source; 1.7.1 pack pending
+
+Integrated remote master c305065 with the shared be quiet change, preserving the actual CORE reconnect recovery and WinVerifyTrust signer fix. The combined hidden-WPF suite also verifies that IO retains its live safety-heartbeat owner and original pair baseline after failed Apply/Restore, until successful recovery disposes it. LocalCI-NoPack passed (including 62 CORE and 92 IO conformance checks); log .codex-tmp/bequiet/merged-local-ci.log will be retained with final package evidence. Release packing now serializes this checkout and refuses any existing target ZIP/setup or checksum BEFORE building, changing the version or clearing the stage; carry/Debug and four collision-preservation checks passed. Next automatic project version is 1.7.1.
+
+Artifact provenance correction: the two concurrent, unpublished packs both used 1.7.0. The shared-IO pack replaced the root 1.7.0 filenames previously recorded by the recovery/signature session below. Those older hashes remain historical evidence of that session's prepared bytes, but are NOT the current root files. No matching retained copy was found in the project inventory; do not claim the earlier bytes were recovered by rebuilding. Neither 1.7.0 pack was published or installed. Current root 1.7.0 files and validation-1.7.0 are the superseded shared-IO pack described below; validation-1.7.0-recovery-signature and the merged source remain intact. Publish only the forthcoming combined 1.7.1 release and feed.
+
+### Superseded, unpublished shared-IO 1.7.0 preparation
 
 Same shared native source/conformance as canonical Light1.4.0, manifest revision2. Case owner's physical evidence commissioned IO bridge373F:0010/MI00, child8003/revision1/firmware wire37; full port has simulated software tests only. Exact bridge+child identity, explicit whole Pump/Fan-bank claim, fresh feedback/error requirement, pump-first/readback guarded commands, one-second sessions and GUI lease worker, no repeated pump kicks, retained recovery and exact reconnect are implemented. Stop restores bank/global mode and leaves pump100. Do not claim external-watchdog/physical fallback after USB/OS/stuck native I/O loss. Unknown model/firmware is unavailable. No private serials/captures in public source. Guide shipped with MIT notice. Existing PRO bench/tach/RPM/acquisition/remote/CLI stays separate, pinned HidSharp2.1/LHM0.9.4 unchanged. Updater installation is refused while panel, saved recovery, RPM hold or acquisition is busy, and rechecks before installer launch.
 
 LocalCI-NoPack passed unchanged four obsolete-HidSharp warning baseline,62 CORE,92 be quiet simulations; paired role/range/input binding gates; hidden panel geometry at1000/850px96DPI;14 RPM hold and59 acquisition checks; remote/CLI stub, benchmark dry run,118 main-layout controls and actual WPF PRO/parent/update interlocks. Single pack auto-bumped AssemblyFileVersion1.6.9→1.7.0; AssemblyVersion remains1.1.0.0. Installer SHA9154DFD8AF97F3FE27CA1707947FE9FA6E4731C0C69A54C95447FD17C20E06F1; portable4EF3C47B0BF8ED7983441177CDCEDA57B39CBF2445F1386FCAF3AC17A9A029D4; EXE D452589DD763A925A5AD63A930BBF4A7CE80728ADBA15E581C2F255E6D21C74B. Unsigned packages retained underartifacts; evidence artifacts/validation-1.7.0/{local-ci.log,pack.log,package.json,cooling-ui}. No registered runner/workflow: local validation only.
 
 Case v7.13 adoption/validation still occupied; handoffs delivered without modifying its worktree. Full OCTO/mainboard parity remains open. LINK packet research is documented, writes disabled because exact previous-state capture/restoration remains unknown. The Light chat coordinates completion; Light bench installation was authorized but is awaiting Case's bench release. No full-app installation/hardware commands were performed here. Publication/updater manifest evidence follows separately. Own temporary build/checkouts cleaned after evidence retention; updater-feed clone retained until its PR/merge.
+
+## 2026-10-01 — Recovery reconnect and verified installer signer, 1.7.0
+
+Fixed both findings from the owner's code review. CORE/XT polling, apply and restore failures
+release the failed connection, retain the original recovery record and block further manual
+writes. Stop / restore retries by reopening only the exact saved device. A close/dispose failure
+cannot leave the dead handle as the next recovery target. Successful restore alone removes the
+record, and unselected settings remain preserved. The existing selected-output 100% fallback
+attempt remains in the feedback-loss path before releasing the connection.
+
+Configured updater signer pins now require successful Windows Authenticode verification and
+the certificate from that verified signer. Extracting an embedded certificate alone no longer
+authenticates an installer. Verification uses cached Windows trust with no UI/network retrieval;
+unsigned, modified, untrusted, catalog-only and unreadable files are rejected when a pin is set.
+An empty pin still permits the existing HTTPS/SHA256-only unsigned release flow.
+
+`Invoke-LocalCI.ps1 -NoPack` passed with the unchanged four-warning baseline, 62 shared checks,
+14 RPM-hold tests, 59 acquisition tests, remote/CLI, layout and Sync/interlock checks. New hidden
+WPF recovery tests cover USB loss, failed reopen/restore, disposal failure, exact saved identity,
+unchanged recovery bytes and preservation of an unselected change. The signer regression accepts
+the trusted embedded signature on installed PowerShell 7, modifies only a scratch copy while
+preserving its certificate, and rejects that altered signature. The copied executable was never
+run. The same positive/negative check passed against the packaged Release helper. No live USB,
+normal app launch, installation or bench/thermal/electrical validation was performed.
+
+A single Release pack auto-bumped FileVersion to **1.7.0**; AssemblyVersion remains **1.1.0.0**.
+The seven ZIP payload files match the clean stage and both SHA256 sidecars match:
+
+- `artifacts/pCUE_1.7.0_setup.exe` (unsigned, 2,653,053 bytes):
+  `3FC43CFCC8FEDAB288364BEA61280B323F4AEC4305BECD7BE870C55F30EF4571`.
+- `artifacts/pCUE_1.7.0_portable.zip` (698,087 bytes):
+  `DC610C7017D32945C8E523AF054A93E8EBC9828F3173326849F2A5D278277E42`.
+- Packaged EXE: `CBDA66003E00FCF6BC54E3ED7F65E711D2971DB0ED3CA489306E0944AB8419E6`.
+
+Retained `artifacts/validation-1.7.0-recovery-signature/` contains local-ci.log, pack.log,
+packaged-signature.log, package.json and illustrative cooling-ui PNGs. Own scratch, copied test
+executables and duplicate worktree staging/packages were cleaned before this handover entry.
+Shared protocol/discovery/conformance files are unchanged and byte-identical to committed
+pCUE Light `3a740a1` and its revision-1 manifest. Light's uncommitted be quiet draft currently
+differs; its cross-app adoption remains with that task and was not copied into this fix.
+The owner's active `feature/shared-bequiet` checkout and update-guard edits were preserved by
+using `.worktrees/recovery-signature`. GX10 preflight had rejected the current AI Check context;
+Codex performed the fix without another route, service change or additional agent. No GitHub
+workflow exists for this repository, so validation is local only.
+
+Source and the auto-generated version stamp were published through
+[PR #26](https://github.com/crmaris/pCUE/pull/26), merged as
+`1519cacf86e010f87a83e92eee136f093ce1d8b0`; source commit
+`495b7df30da133940c8e109cfb19efeee340af1f` is verified in remote `master`.
+The merged source branch was deleted. Installer/portable remain prepared locally at the paths
+above; this session did not change public release assets, the updater feed or an installed app.
+The lean, clean `.worktrees/recovery-signature` checkout retains the merged fix while the owner's
+original checkout continues its uncommitted be quiet/update-guard work. Merge these fixes into
+that feature branch before its next pack, to avoid superseding them or reusing FileVersion 1.7.0.
+
 ## 2026-10-01 — Shared CORE/XT percentage panel, 1.6.9
 
 Added a separate **Cooling controllers** panel for CORE (1B1C:0C1C, EXT + six fans) and CORE XT (0C2A, six fans). Metadata discovery selects one device automatically or asks for a choice among several, remembering its exact identity. Explicit Connect reads settings/RPM; fresh outputs stay unchecked. Fan/Pump and manual percentages have per-output limits; Pump defaults to 100% and minimum 60%, configurable. Atomic recovery precedes writes, selected values are merged/read back, and Stop/close restores captured settings. Failed restore keeps the panel/record available. Parent/update close and PRO open are blocked while the panel owns a session. Original six-channel PRO fixed-RPM/tach/acquisition/remote/CLI behavior remains separate.

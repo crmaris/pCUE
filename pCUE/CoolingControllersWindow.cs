@@ -46,8 +46,9 @@ namespace pCUE
     {
         static readonly string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "pCUE", "controllers");
         static readonly string RecoveryPath = Path.Combine(Folder, "recovery.json");
-        static readonly string SetupPath = Path.Combine(Folder, "setup.json");
         public static bool HasSavedRecovery { get { return File.Exists(RecoveryPath); } }
+        readonly string storageFolder, recoveryPath, setupPath;
+        readonly Func<CoolingUsbInfo, INativeCoolingController> openController;
         readonly JavaScriptSerializer json = new JavaScriptSerializer();
         readonly ObservableCollection<CoolingOutputRow> rows = new ObservableCollection<CoolingOutputRow>();
         readonly ComboBox devices = new ComboBox { MinWidth = 350, FontSize = 15 };
@@ -63,10 +64,14 @@ namespace pCUE
         int[] previous;
         bool busy, closing, writing;
         readonly bool isPreview;
-        public bool PendingRecovery { get { return !isPreview && (recovery != null || File.Exists(RecoveryPath)); } }
+        public bool PendingRecovery { get { return !isPreview && (recovery != null || File.Exists(recoveryPath)); } }
         public bool Busy { get { return busy; } }
-        public CoolingControllersWindow(bool preview = false)
+        public CoolingControllersWindow(bool preview = false) : this(preview, Folder, CoolingUsbDiscovery.Open) { }
+        internal CoolingControllersWindow(bool preview, string dataFolder, Func<CoolingUsbInfo, INativeCoolingController> open)
         {
+            storageFolder = dataFolder ?? throw new ArgumentNullException(nameof(dataFolder));
+            recoveryPath = Path.Combine(storageFolder, "recovery.json"); setupPath = Path.Combine(storageFolder, "setup.json");
+            openController = open ?? throw new ArgumentNullException(nameof(open));
             isPreview = preview;
             Title = "pCUE · Cooling controllers"; Width = 1000; Height = 710; MinWidth = 850; MinHeight = 570;
             Background = new SolidColorBrush(Color.FromRgb(17, 24, 39)); Foreground = Brushes.WhiteSmoke; FontFamily = new FontFamily("Segoe UI"); FontSize = 15;
@@ -87,7 +92,7 @@ namespace pCUE
             var actions = new StackPanel { Orientation = Orientation.Horizontal }; Grid.SetRow(actions, 5); layout.Children.Add(actions);
             apply = ActionButton("Apply selected outputs", Apply); restore = ActionButton("Stop / restore", Restore); actions.Children.Add(apply); actions.Children.Add(restore);
             timer.Tick += async delegate { Interlocked.Exchange(ref uiHeartbeat, Stopwatch.GetTimestamp()); if (!busy && controller != null) await Poll(); };
-            Closing += ClosingWindow; Closed += delegate { timer.Stop(); if (controller != null) controller.Dispose(); };
+            Closing += ClosingWindow; Closed += delegate { timer.Stop(); ReleaseController(); };
             if (preview)
             {
                 for (int i = 0; i < 7; i++) rows.Add(new CoolingOutputRow { Channel = i, Name = i == 0 ? "AIO / EXT pump" : "Fan " + i, Role = i == 0 ? "Pump" : "Fan", Percent = i == 0 ? 100 : 40, Minimum = i == 0 ? 60 : 30, Rpm = (1000 + i * 100).ToString(), HardwareSetting = "Firmware curve", CanControl = true });
@@ -97,22 +102,36 @@ namespace pCUE
         }
         void TextColumn(string header, string path, int width, bool readOnly) { grid.Columns.Add(new DataGridTextColumn { Header = header, Binding = new Binding(path) { UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged, ValidatesOnExceptions = true }, Width = width, IsReadOnly = readOnly }); }
         Button ActionButton(string text, Func<Task> action) { var button = new Button { Content = text, Padding = new Thickness(16, 10, 16, 10), Margin = new Thickness(12, 0, 0, 0), Foreground = Brushes.Black, FontSize = 15 }; button.Click += async delegate { if (!busy) await action(); }; return button; }
-        static void Save(string path, string data)
+        void Save(string path, string data)
         {
-            Directory.CreateDirectory(Folder); string temporary = path + ".new"; File.WriteAllText(temporary, data); if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path);
+            Directory.CreateDirectory(storageFolder); string temporary = path + ".new"; File.WriteAllText(temporary, data); if (File.Exists(path)) File.Replace(temporary, path, null); else File.Move(temporary, path);
+        }
+        void ReleaseController()
+        {
+            var old = controller; controller = null;
+            try { if (old != null) old.Dispose(); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Cooling controller close failed: " + ex.Message); }
+            foreach (var row in rows) { row.Rpm = "—"; row.HardwareSetting = "Unavailable"; row.CanControl = false; row.Changed(); }
+        }
+        void ReleaseFailedController()
+        {
+            // CORE retries with a new handle. IO retains its whole-pair owner and
+            // safety heartbeat until Restore succeeds; its driver reconnects an
+            // unusable handle only against the same commissioned child.
+            if (selected == null || selected.Kind != "bequiet") ReleaseController();
+            else foreach (var row in rows) { row.Rpm = "—"; row.HardwareSetting = "Recovery required"; row.CanControl = false; row.Changed(); }
         }
         void Buttons()
         {
             connect.IsEnabled = !busy && controller == null && !PendingRecovery; refresh.IsEnabled = !busy && controller == null && !PendingRecovery; devices.IsEnabled = !busy && controller == null && !PendingRecovery;
-            apply.IsEnabled = !busy && controller != null && rows.Any(r => r.CanControl) && (recovery != null || !File.Exists(RecoveryPath)); restore.IsEnabled = !busy && PendingRecovery; grid.IsEnabled = !writing;
+            apply.IsEnabled = !busy && controller != null && rows.Any(r => r.CanControl) && (recovery != null || !File.Exists(recoveryPath)); restore.IsEnabled = !busy && PendingRecovery; grid.IsEnabled = !writing;
         }
         async Task Discover()
         {
             busy = true; Buttons();
             try
             {
-                try { saved = File.Exists(SetupPath) ? json.Deserialize<CoolingControllerSetup>(File.ReadAllText(SetupPath)) : null; } catch { saved = null; }
-                if (File.Exists(RecoveryPath)) { recovery = json.Deserialize<CoolingControllerRecovery>(File.ReadAllText(RecoveryPath)); status.Text = "Saved controller recovery must be restored before starting."; return; }
+                try { saved = File.Exists(setupPath) ? json.Deserialize<CoolingControllerSetup>(File.ReadAllText(setupPath)) : null; } catch { saved = null; }
+                if (File.Exists(recoveryPath)) { recovery = json.Deserialize<CoolingControllerRecovery>(File.ReadAllText(recoveryPath)); status.Text = "Saved controller recovery must be restored before starting."; return; }
                 var found = await Task.Run(CoolingUsbDiscovery.Find); devices.ItemsSource = found;
                 if (saved != null && saved.DeviceId != null) devices.SelectedItem = found.FirstOrDefault(d => d.Id == saved.DeviceId);
                 else if (found.Length == 1) devices.SelectedIndex = 0;
@@ -127,7 +146,7 @@ namespace pCUE
             try
             {
                 if (saved != null && saved.DeviceId == selected.Id) selected.ChildSerial = saved.ChildSerial;
-                controller = await Task.Run(delegate { return CoolingUsbDiscovery.Open(selected); }); var state = await Task.Run(controller.Read); selected.ChildSerial = state.ChildSerial; rows.Clear();
+                controller = await Task.Run(delegate { return openController(selected); }); var state = await Task.Run(controller.Read); selected.ChildSerial = state.ChildSerial; rows.Clear();
                 for (int i = 0; i < controller.Count; i++)
                 {
                     var old = saved != null && saved.DeviceId == selected.Id && saved.Outputs != null ? saved.Outputs.FirstOrDefault(r => r.Channel == i) : null;
@@ -135,8 +154,8 @@ namespace pCUE
                     if (old != null) { rows.Last().Minimum = old.Minimum; rows.Last().Percent = old.Percent; }
                 }
                 Present(state); previous = Enumerable.Repeat(-1, controller.Count).ToArray();
-                Save(SetupPath, json.Serialize(new CoolingControllerSetup { DeviceId = selected.Id, ChildSerial = selected.ChildSerial, Outputs = rows.ToArray() }));
-            } catch (Exception ex) { status.Text = ex.Message; if (controller != null) controller.Dispose(); controller = null; }
+                Save(setupPath, json.Serialize(new CoolingControllerSetup { DeviceId = selected.Id, ChildSerial = selected.ChildSerial, Outputs = rows.ToArray() }));
+            } catch (Exception ex) { status.Text = ex.Message; ReleaseController(); }
             finally { busy = false; Buttons(); }
         }
         void Present(CoreState state)
@@ -148,7 +167,12 @@ namespace pCUE
         {
             busy = true; Buttons();
             try { Present(await Task.Run(controller.Read)); }
-            catch (Exception ex) { status.Text = "Controller feedback lost. Recovery remains saved. " + ex.Message; if (recovery != null) try { await Task.Run(delegate { controller.Apply(recovery.Baseline.Selected.Select(v => v ? 100 : -1).ToArray(), Enumerable.Repeat(-1, controller.Count).ToArray(), null); }); } catch { } }
+            catch (Exception ex)
+            {
+                if (recovery != null) try { await Task.Run(delegate { controller.Apply(recovery.Baseline.Selected.Select(v => v ? 100 : -1).ToArray(), Enumerable.Repeat(-1, controller.Count).ToArray(), null); }); } catch { }
+                ReleaseFailedController();
+                status.Text = "Controller feedback lost. Reconnect the same device and select Stop / restore to retry recovery. " + ex.Message;
+            }
             finally { busy = false; Buttons(); }
         }
         async Task Apply()
@@ -162,10 +186,10 @@ namespace pCUE
             busy = writing = true; Buttons();
             try
             {
-                if (recovery == null) { var baseline = await Task.Run(delegate { return controller.Capture(mask); }); var next = new CoolingControllerRecovery { Device = selected, Baseline = baseline }; Save(RecoveryPath, json.Serialize(next)); recovery = next; }
+                if (recovery == null) { var baseline = await Task.Run(delegate { return controller.Capture(mask); }); var next = new CoolingControllerRecovery { Device = selected, Baseline = baseline }; Save(recoveryPath, json.Serialize(next)); recovery = next; }
                 int[] desired = rows.Select(r => r.Enabled ? r.Percent : -1).ToArray(); await Task.Run(delegate { controller.Apply(desired, previous, UiResponsive); }); previous = desired;
-                Save(SetupPath, json.Serialize(new CoolingControllerSetup { DeviceId = selected.Id, ChildSerial = selected.ChildSerial, Outputs = rows.ToArray() })); status.Text = selected.Kind == "bequiet" ? "IO pair applied and verified. Stop / restore returns fan bank and mode, leaving pump at 100%." : "Selected output percentages applied and verified. Stop / restore returns the captured settings.";
-            } catch (Exception ex) { status.Text = "Control failed; restore saved settings. " + ex.Message; }
+                Save(setupPath, json.Serialize(new CoolingControllerSetup { DeviceId = selected.Id, ChildSerial = selected.ChildSerial, Outputs = rows.ToArray() })); status.Text = selected.Kind == "bequiet" ? "IO pair applied and verified. Stop / restore returns fan bank and mode, leaving pump at 100%." : "Selected output percentages applied and verified. Stop / restore returns the captured settings.";
+            } catch (Exception ex) { ReleaseFailedController(); status.Text = "Control failed; restore saved settings. " + ex.Message; }
             finally { busy = writing = false; Buttons(); }
         }
         async Task Restore()
@@ -173,10 +197,10 @@ namespace pCUE
             busy = writing = true; Buttons();
             try
             {
-                if (recovery == null) recovery = json.Deserialize<CoolingControllerRecovery>(File.ReadAllText(RecoveryPath));
-                if (controller == null) { selected = recovery.Device; selected.ChildSerial = recovery.Baseline.ChildSerial; controller = await Task.Run(delegate { return CoolingUsbDiscovery.Open(selected); }); }
-                await Task.Run(delegate { controller.Restore(recovery.Baseline); }); File.Delete(RecoveryPath); recovery = null; previous = null; controller.Dispose(); controller = null; rows.Clear(); status.Text = "Stopped · Saved controller settings restored. Connect to monitor again.";
-            } catch (Exception ex) { status.Text = "Recovery incomplete. Saved settings are retained. " + ex.Message; }
+                if (recovery == null) recovery = json.Deserialize<CoolingControllerRecovery>(File.ReadAllText(recoveryPath));
+                if (controller == null) { selected = recovery.Device; selected.ChildSerial = recovery.Baseline.ChildSerial; controller = await Task.Run(delegate { return openController(selected); }); }
+                await Task.Run(delegate { controller.Restore(recovery.Baseline); }); File.Delete(recoveryPath); recovery = null; previous = null; ReleaseController(); rows.Clear(); status.Text = "Stopped · Saved controller settings restored. Connect to monitor again.";
+            } catch (Exception ex) { ReleaseFailedController(); status.Text = "Recovery incomplete. Saved settings are retained. " + ex.Message; }
             finally { busy = writing = false; Buttons(); }
         }
         async void ClosingWindow(object sender, CancelEventArgs e)

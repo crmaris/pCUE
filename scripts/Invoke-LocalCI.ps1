@@ -89,6 +89,10 @@ Step 'Build (Debug)' {
     try { if (Test-Path $buildLog) { Remove-Item $buildLog -Force } } catch { }
 }
 
+Step 'Release artifact preservation (no build or hardware)' {
+    & pwsh -NoProfile -File (Join-Path $root 'tests\ReleaseArtifactGuard.ps1') -ScratchPath (Join-Path $root '.codex-tmp\release-guard')
+}
+
 Step 'Shared cooling controller conformance and UI preview (no hardware)' {
     & (Join-Path $root 'shared\Test-SharedSource.ps1') -Root $root
     & $msbuild (Join-Path $root 'tests\CoolingControllers\CoolingControllers.csproj') /t:Rebuild /p:Configuration=Debug /m:1 /nr:false /v:minimal /nologo

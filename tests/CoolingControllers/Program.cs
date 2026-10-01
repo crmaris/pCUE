@@ -19,6 +19,8 @@ static class Program
         {
             CoreBackendTests.Run();
             BeQuietBackendTests.Run();
+
+            CoolingRecoveryTests.Run();
             var row = new CoolingOutputRow { Minimum = 30, Percent = 40 }; row.Role = "Pump";
             Check(row.Minimum == 60 && row.Percent == 100 && !row.Enabled, "Pump defaults/opt-in.");
             row.Percent = 75; row.Role = "Pump"; Check(row.Percent == 75, "Existing pump percentage reset.");

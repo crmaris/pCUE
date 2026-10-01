@@ -87,13 +87,29 @@ $root      = Split-Path $PSScriptRoot -Parent
 $proj      = Join-Path $root 'pCUE\pCUE.csproj'
 $artifacts = Join-Path $root 'artifacts'
 $stage     = Join-Path $artifacts 'stage\pCUE'
+. (Join-Path $PSScriptRoot 'ReleaseArtifactGuard.ps1')
+
+# FileShare.None serializes packers that share this checkout/artifact directory.
+# Refuse collisions before building, changing the version stamp or clearing the stage.
+New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
+$packLock = [System.IO.File]::Open((Join-Path $artifacts '.pack.lock'),
+    [System.IO.FileMode]::OpenOrCreate, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
+try {
+$plannedVersion = Get-PlannedReleaseVersion (Join-Path $root 'pCUE\Properties\AssemblyInfo.cs') $Configuration
+Assert-ReleaseArtifactsAvailable $artifacts $plannedVersion
 
 if ($Configuration -ne 'Release') {
   Write-Warning "Packing a non-Release ($Configuration) build: version bump and optimizations differ from shipped releases."
 }
 Write-Host "== pCUE release pack ==  config=$Configuration"
 New-Item -ItemType Directory -Force -Path $artifacts | Out-Null
-if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+if (Test-Path -LiteralPath $stage) {
+    $resolvedStage = [System.IO.Path]::GetFullPath($stage)
+    if ($resolvedStage -ne [System.IO.Path]::GetFullPath((Join-Path $root 'artifacts\stage\pCUE'))) {
+        throw 'Release stage is outside the intended project staging directory.'
+    }
+    [System.IO.Directory]::Delete($resolvedStage, $true)
+}
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
 # 1) clean staged build ------------------------------------------------------
@@ -114,6 +130,8 @@ Get-ChildItem $stage -Recurse -Include *.pdb, *.xml -File | Remove-Item -Force
 # The Release build bumps AssemblyFileVersion, so read the version AFTER building: the freshly
 # built exe is the single source of truth for what we are shipping.
 $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe).FileVersion
+if ($version -ne $plannedVersion) { throw "Built version $version differs from reserved version $plannedVersion." }
+Assert-ReleaseArtifactsAvailable $artifacts $version
 Write-Host "  version:  $version"
 Write-Host ("  staged:   {0} files, {1:N1} MB" -f `
   (Get-ChildItem $stage -Recurse -File).Count,
@@ -126,7 +144,6 @@ Invoke-Sign -Paths @($exe) -Why 'staged app exe'
 # 2) portable zip (+ sha256) -------------------------------------------------
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zip = Join-Path $artifacts "pCUE_${version}_portable.zip"
-if (Test-Path $zip) { Remove-Item $zip -Force }
 [System.IO.Compression.ZipFile]::CreateFromDirectory($stage, $zip,
     [System.IO.Compression.CompressionLevel]::Optimal, $true)
 (Get-FileHash $zip -Algorithm SHA256).Hash | Out-File "$zip.sha256" -Encoding ascii -NoNewline
@@ -172,3 +189,4 @@ if ($doSign) {
   Write-Host "Done. Artifacts are UNSIGNED and land in $artifacts (git-ignored)."
   Write-Host "  To sign, re-run with -Thumbprint <cert> (or -PfxPath <file>)." -ForegroundColor Yellow
 }
+} finally { $packLock.Dispose() }
