@@ -5,7 +5,7 @@
         xmlns:system="clr-namespace:System;assembly=mscorlib"
         xmlns:wf="clr-namespace:System.Windows.Forms;assembly=System.Windows.Forms"      
     
-    Title="pCUE - Cybenetics LTD" Height="687" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
+    Title="pCUE - Cybenetics LTD" Height="730" Width="626" Foreground="#FFE0E5C8" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closed="Window_Closed" Closing="Window_Closing" Icon="small.ico">
 
     <Window.Background>
         <LinearGradientBrush EndPoint="0.5,1" StartPoint="0.5,0">
@@ -189,5 +189,7 @@
         <PasswordBox x:Name="Remote_Token_Box" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="306,617,0,0" Width="104" Height="21" Background="#FF15743E" Foreground="#FFF6F1F1" ToolTip="Required for access from other machines. Leave empty to keep pCUE reachable only from this PC." LostFocus="Remote_Settings_Changed"/>
         <CheckBox x:Name="Debug_Log_CheckBox" Content="Local debug" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="419,619,0,0" Foreground="#FFF5EFEF" ToolTip="Verbose logging for this pCUE to %LOCALAPPDATA%\pCUE\logs." Checked="Debug_Log_Changed" Unchecked="Debug_Log_Changed"/>
         <TextBlock x:Name="Remote_Status_Label" Grid.ColumnSpan="2" Text="● Off" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="510,620,0,0" Width="94" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="#FFD3D3D3"/>
+        <Button x:Name="Cooling_Controllers_Button" Content="Cooling controllers" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16,654,0,0" Width="190" Height="28" Background="#FF3806FB" Foreground="White" Click="Cooling_Controllers_Click"/>
+        <TextBlock Text="CORE / CORE XT · Fan and pump % · Experimental" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="218,659,0,0" Width="386" Foreground="White"/>
     </Grid>
 </Window>

@@ -63,6 +63,22 @@ try {
     }
 
     Write-Host 'Sync controls: checkbox alignment, numeric, slider, and independent edits passed.'
+    # A preview panel opens no hardware/settings. Exercise the actual parent's
+    # interlocks so a remote/auto PRO open or updater close cannot bypass it.
+    $privateFlags = [System.Reflection.BindingFlags]'Instance,NonPublic'
+    $panelType = $assembly.GetType('pCUE.CoolingControllersWindow')
+    $panel = [Activator]::CreateInstance($panelType, @($true))
+    $panelField = $window.GetType().GetField('coolingControllersWindow', $privateFlags)
+    try {
+        $panelField.SetValue($window, $panel)
+        if (-not $window.SetCommanderOpen($true)) { throw 'Controller panel allowed a PRO open.' }
+        $window.GetType().GetField('suppressCloseConfirm', $privateFlags).SetValue($window, $true)
+        $closingArgs = New-Object System.ComponentModel.CancelEventArgs
+        [void]$window.GetType().GetMethod('Window_Closing', $privateFlags).Invoke($window, @($window, $closingArgs.PSObject.BaseObject))
+        if (-not $closingArgs.Cancel) { throw 'Controller panel did not block parent/update closure.' }
+        Write-Host 'Cooling panel interlocks: real PRO open refused and parent/update close blocked (no hardware).'
+    }
+    finally { $panelField.SetValue($window, $null); $panel.Close() }
 }
 finally {
     $field = $window.GetType().GetField('suppressCloseConfirm',

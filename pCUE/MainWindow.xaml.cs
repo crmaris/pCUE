@@ -42,6 +42,7 @@ namespace pCUE
         //window only orchestrates UI, polling and the hold loop on top of it.
         readonly CommanderProDevice commander = new CommanderProDevice();
         bool Corsair_Commander_Connected = false;
+        CoolingControllersWindow coolingControllersWindow;
 
         //Background fan-RPM polling (replaces the old UI-thread WinForms timer).
         CancellationTokenSource fanPollCts;
@@ -417,6 +418,7 @@ namespace pCUE
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {
+            if (coolingControllersWindow != null) { e.Cancel = true; SetStatus("Close the cooling controller panel after restoring its outputs.", UpdateAlertBrush); return; }
             //An update install already asked for confirmation - do not ask a second time.
             if (suppressCloseConfirm)
             {
@@ -774,8 +776,19 @@ namespace pCUE
             return commander.WriteFanPower(fan_channel, fan_power);
         }
 
+        private void Cooling_Controllers_Click(object sender, RoutedEventArgs e)
+        {
+            if (IsRemoteMode || Corsair_Commander_Connected || AcquisitionLeased)
+            {
+                SetStatus("Use This PC and close Commander PRO / release acquisition before opening cooling controllers.", UpdateAlertBrush); return;
+            }
+            try { coolingControllersWindow = new CoolingControllersWindow { Owner = this }; coolingControllersWindow.ShowDialog(); }
+            finally { coolingControllersWindow = null; }
+        }
+
         private async void Open_Corsair_Commander_Click(object sender, RoutedEventArgs e)
         {
+            if (coolingControllersWindow != null) { SetStatus("Close the cooling controller panel before opening Commander PRO.", UpdateAlertBrush); return; }
             if (AcquisitionLeased) { SetStatus(AcquisitionBusy, UpdateAlertBrush); return; }
             if (IsRemoteMode)
             {

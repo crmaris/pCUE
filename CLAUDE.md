@@ -4,6 +4,18 @@ Fan-control desktop app for the **Corsair Commander PRO** (Cybenetics LTD). WPF,
 4.8**, C# (classic `packages.config` project, AnyCPU). This file is the canonical handover; keep it
 current. `AGENTS.md` is a thin pointer to this file.
 
+## 2026-10-01 — Shared CORE/XT percentage panel, 1.6.9
+
+Added a separate **Cooling controllers** panel for CORE (1B1C:0C1C, EXT + six fans) and CORE XT (0C2A, six fans). Metadata discovery selects one device automatically or asks for a choice among several, remembering its exact identity. Explicit Connect reads settings/RPM; fresh outputs stay unchecked. Fan/Pump and manual percentages have per-output limits; Pump defaults to 100% and minimum 60%, configurable. Atomic recovery precedes writes, selected values are merged/read back, and Stop/close restores captured settings. Failed restore keeps the panel/record available. Parent/update close and PRO open are blocked while the panel owns a session. Original six-channel PRO fixed-RPM/tach/acquisition/remote/CLI behavior remains separate.
+
+Experimental controller paths: no live CORE/XT actuation, electrical/thermal/sleep checks, normal app launch, Sound-PC or other installation. Unknown firmware layouts remain non-writable. Reads briefly wake/sleep global operating mode; close competing utilities. No LED/curve/wiring/flash-save commands. See COOLING-CONTROLLERS.md and shared/README.md. Full pCUE's HidSharp 2.1.0 and LHM 0.9.4 remain pinned. Shared source is independently authored MIT code; included notice ships in installer/portable. Hash manifest and conformance suite match canonical Light 1.3.0. CORE SHA CAB9EC63D03A4F7F1B6AB04DB188A7BC3B8FEAA7890BF4DF3DE3D39A1FAC7F3C; discovery 2E8BB249774F544BB23D6B624AECAB634CBF9409F2BC0535D0680B7435A4AE22; tests 7ECD5C707BDF68E1A05BEB6909ECD7124492C195796899AC28D321392B51CE8F.
+
+Invoke-LocalCI -NoPack passed: warning baseline unchanged (four obsolete HidSharp warnings); 62 shared conformance checks; hidden 96-DPI panel previews at default/narrow/minimum geometry; pump/input validation; 14 RPM-hold checks, 59 acquisition checks, remote protocol/CLI stub tests, bench dry-run, 118-control main layout and real WPF Sync/interlock checks. Preview code does not open hardware/read recovery/save settings/show windows. Screenshots inspected. Retained artifacts/validation-1.6.9/local-ci.log, pack.log, package.json and cooling-ui PNGs. Source-manifest parity check passed against Light.
+
+First pack 1.6.8 was superseded before publication when the MIT notice/operator guide were added; final auto-bumped **1.6.9**. Installer SHA **F33CE9DC978CAFAA525052AE505B23578BCE2F1BAFFF038E2DDCDFEBB1252287**; portable **C7746846A122659E94EC05B958853DD04032E4C1BC3333EEAA00AB7D769BCD62**; EXE **629FE48F0538F6CED15AF85BA35E51D54D1853BB30CB2D517E954FC2C7AFA99E**. Installer is unsigned. Own scratch/staging/new test output and unpublished 1.6.8 packages removed; existing owner output/1.6.7 release retained. No workflow or registered runner exists: local validation only, no infrastructure changes. Publication evidence follows separately.
+
+Owner also requested parity with Light and Case Tests. Case's cooler chat remains occupied; shared-driver transfer follows its completion. Full parity is pending: OCTO/mainboard adapters, Case CORE/XT adoption, verified be quiet native physical response/restore and iCUE LINK capture/restore. LINK functional research is in shared/README.md; write control is not enabled. The Light chat's heartbeat coordinates the authorized Case handoff and all-app reconciliation. GX10 untouched. No live bench deployment is implied by this release.
+
 ## 2026-09-25 — Seasonic PWM endpoint reachability on 1.6.7
 
 After the completed 1000/1400 RPM acoustic run, the owner requested a broader Seasonic

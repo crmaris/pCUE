@@ -105,6 +105,8 @@ if ($LASTEXITCODE -ne 0) { throw "build failed (exit $LASTEXITCODE)" }
 
 $exe = Join-Path $stage 'pCUE.exe'
 if (-not (Test-Path $exe)) { throw "staged build produced no pCUE.exe" }
+Copy-Item -LiteralPath (Join-Path $root 'shared\LICENSE') -Destination (Join-Path $stage 'CoolingControllers-MIT.txt')
+Copy-Item -LiteralPath (Join-Path $root 'COOLING-CONTROLLERS.md') -Destination $stage
 
 # Drop development-only files; they are not needed to run and only bloat the package.
 Get-ChildItem $stage -Recurse -Include *.pdb, *.xml -File | Remove-Item -Force
