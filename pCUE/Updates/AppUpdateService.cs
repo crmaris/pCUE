@@ -5,7 +5,9 @@ using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -61,8 +63,9 @@ namespace pCUE
     ///   4. Checking never installs anything by itself.
     ///
     /// TRUST: rules 1-2 are INTEGRITY, not authenticity. A compromised manifest repo serving a
-    /// matching url+sha256 would be accepted, then launched elevated (pCUE runs as admin) after
-    /// the user's two confirms. There is no Authenticode or out-of-band signature check.
+    /// matching url+sha256 would be accepted with an empty signer pin, then launched elevated
+    /// after the user's two confirms. A configured pin additionally requires valid Windows
+    /// Authenticode trust and the verified signer's certificate thumbprint.
     ///
     /// Manifest shape (the shared Cybenetics manifest):
     ///   { "apps": { "pcue": { "version": "1.3.0.19", "url": "https://...", "sha256": "...",
@@ -317,7 +320,7 @@ namespace pCUE
                 {
                     TryDelete(target);
                     throw new InvalidOperationException(
-                        "The download is unsigned but a signer pin is configured - rejected and deleted.");
+                        "The download has no valid trusted Authenticode signature but a signer pin is configured - rejected and deleted.");
                 }
                 if (!signer.Equals(pin, StringComparison.OrdinalIgnoreCase))
                 {
@@ -382,23 +385,85 @@ namespace pCUE
         }
 
         /// <summary>
-        /// Thumbprint (no spaces, uppercase) of the Authenticode signing certificate, or null when
-        /// the file is unsigned/unreadable. Signature CHAIN validity is deliberately not checked:
-        /// the sha256 match already proves byte-integrity, so the pin only needs to prove origin.
+        /// Thumbprint of the embedded signer that Windows actually verified, or null for
+        /// unsigned, modified, untrusted, catalog-only or unreadable files. Uses cached Windows trust
+        /// only, without UI or network retrieval. A manifest hash is not signer authentication.
         /// </summary>
         public static string GetAuthenticodeThumbprint(string path)
         {
             try
             {
-                var cert = System.Security.Cryptography.X509Certificates.X509Certificate.CreateFromSignedFile(path);
-                string thumb = cert.GetCertHashString();
-                return string.IsNullOrWhiteSpace(thumb) ? null : thumb.Replace(" ", "");
+                if (string.IsNullOrWhiteSpace(path)) return null;
+                var file = new WinTrustFile { Size = (uint)Marshal.SizeOf(typeof(WinTrustFile)), Path = System.IO.Path.GetFullPath(path) };
+                IntPtr filePointer = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(WinTrustFile)));
+                bool initialized = false;
+                var data = new WinTrustData { Size = (uint)Marshal.SizeOf(typeof(WinTrustData)), UiChoice = 2, UnionChoice = 1,
+                    File = filePointer, StateAction = 1, ProviderFlags = 0x1000 | 0x10, UiContext = 1 };
+                var action = new Guid("00AAC56B-CD44-11D0-8CC2-00C04FC295EE");
+                try
+                {
+                    Marshal.StructureToPtr(file, filePointer, false); initialized = true;
+                    if (WinVerifyTrust(new IntPtr(-1), ref action, ref data) != 0) return null;
+                    IntPtr provider = WTHelperProvDataFromStateData(data.StateData);
+                    if (provider == IntPtr.Zero) return null;
+                    IntPtr signerPointer = WTHelperGetProvSignerFromChain(provider, 0, false, 0);
+                    if (signerPointer == IntPtr.Zero) return null;
+                    var signer = (ProviderSignerHeader)Marshal.PtrToStructure(signerPointer, typeof(ProviderSignerHeader));
+                    if (signer.CertificateCount == 0 || signer.Certificates == IntPtr.Zero) return null;
+                    var certificate = (ProviderCertificateHeader)Marshal.PtrToStructure(signer.Certificates, typeof(ProviderCertificateHeader));
+                    if (certificate.Certificate == IntPtr.Zero) return null;
+                    using (var cert = new X509Certificate2(certificate.Certificate)) return cert.GetCertHashString();
+                }
+                finally
+                {
+                    try { if (initialized) { data.StateAction = 2; WinVerifyTrust(new IntPtr(-1), ref action, ref data); } }
+                    finally { if (initialized) Marshal.DestroyStructure(filePointer, typeof(WinTrustFile)); Marshal.FreeHGlobal(filePointer); }
+                }
             }
             catch
             {
                 return null;
             }
         }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct WinTrustFile
+        {
+            public uint Size;
+            [MarshalAs(UnmanagedType.LPWStr)] public string Path;
+            public IntPtr FileHandle, KnownSubject;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct WinTrustData
+        {
+            public uint Size;
+            public IntPtr PolicyCallback, SipClient;
+            public uint UiChoice, RevocationChecks, UnionChoice;
+            public IntPtr File;
+            public uint StateAction;
+            public IntPtr StateData, UrlReference;
+            public uint ProviderFlags, UiContext;
+            public IntPtr SignatureSettings;
+        }
+        // Read only the leading fields of the provider-owned native structures.
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProviderSignerHeader
+        {
+            public uint Size, VerifyTimeLow, VerifyTimeHigh, CertificateCount;
+            public IntPtr Certificates;
+        }
+        [StructLayout(LayoutKind.Sequential)]
+        private struct ProviderCertificateHeader
+        {
+            public uint Size;
+            public IntPtr Certificate;
+        }
+        [DllImport("wintrust.dll", ExactSpelling = true)]
+        private static extern int WinVerifyTrust(IntPtr window, ref Guid action, ref WinTrustData data);
+        [DllImport("wintrust.dll", ExactSpelling = true)]
+        private static extern IntPtr WTHelperProvDataFromStateData(IntPtr stateData);
+        [DllImport("wintrust.dll", ExactSpelling = true)]
+        private static extern IntPtr WTHelperGetProvSignerFromChain(IntPtr provider, uint signer, [MarshalAs(UnmanagedType.Bool)] bool counterSigner, uint counterSignerIndex);
 
         private static void TryDelete(string path)
         {
