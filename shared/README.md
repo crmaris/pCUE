@@ -38,3 +38,5 @@ Sources (functional references; no third-party driver source/binary copied):
 ## Required parity check
 
 Before releasing any of the three apps, compare SHA256 of BOTH shared `.cs` files against canonical pCUE-Light and run the same conformance test suite with the consuming app's dependencies. Record hashes and test evidence in the app handover. Updating one copy creates a parity gap until the other two adopt it; explicitly report pending apps. Protocol changes belong in this source and conformance suite first, rather than in separate UI-specific drivers.
+
+Set `shared/* text eol=lf` and the app's conformance-file path `text eol=lf` in `.gitattributes`. These byte hashes include line endings; Windows autocrlf must not change them. `shared/Test-SharedSource.ps1` checks the committed manifest and can compare against a local canonical root.
