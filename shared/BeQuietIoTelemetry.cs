@@ -11,14 +11,15 @@ namespace Pcue.Cooling
 {
     // Read-only protocol subset observed on IO Controller 373F:0010, interface 00.
     // Channel identities are raw protocol identities; fan/pump roles require commissioning.
-    internal sealed class BeQuietIoReading
+    public sealed class BeQuietIoReading
     {
-        internal int Channel;
-        internal byte Session, CoolerSession;
-        internal int RawValue;
-        internal DateTime ReceivedUtc;
-        internal double Value { get { return Channel == 0 ? RawValue / 10.0 : RawValue; } }
-        internal string Unit { get { return Channel == 0 ? "C" : Channel == 3 ? "Condition" : "RPM"; } }
+        public int Channel { get; internal set; }
+        public byte Session { get; internal set; }
+        public byte CoolerSession { get; internal set; }
+        public int RawValue { get; internal set; }
+        public DateTime ReceivedUtc { get; internal set; }
+        public double Value { get { return Channel == 0 ? RawValue / 10.0 : RawValue; } }
+        public string Unit { get { return Channel == 0 ? "C" : Channel == 3 ? "Condition" : "RPM"; } }
     }
 
     internal static class BeQuietIoProtocol

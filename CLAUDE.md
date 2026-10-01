@@ -1,5 +1,11 @@
 # pCUE — handover (canonical)
 
+## 2026-10-01 — Shared revision4 Case adapter dependencies, source only
+
+Copied canonical Light revision4 source/tests byte-identically: explicit IO minimumPumpDuty0–25 (default25), optional cloned raw-report observer preserved on exact reconnect, and cloned Fresh telemetry preserving real ReceivedUtc/session IDs/condition without polling USB. Case explicitly requires manual0–100; full and Light retain their old constructor/default25 and existing UI floors. Fresh zero RPM is allowed only after this owner's verified pump0/software-mode command; stale/missing/error feedback, wrong settings/mode, positive-duty zero and partial/cancelled/failed commands still fault/park. Recovery always leaves pump100. Physical0–24 response/stop is unverified.
+
+Approved Debug shared/WPF build and simulated tests passed62 CORE,153 IO,3281 peripheral assertions, exact recovery/failed-owner/selection tests and the existing hidden panel preview using unchanged Hid2.1/LHM0.9.4. Hash parity passed against Light. Evidence/source publication receipts are artifacts/validation-shared-revision4/{full-build.log,full-tests.log,parity.log,publication.json,cooling-ui}. This is local validation; no registered CI route. No Release build/version bump/package/feed update/installation/hardware actions. Published1.7.2 assets/tag remain unchanged. Case is actively wiring its adapters after local7.18 UI work; its bench/share7.16 and all bench workloads/apps/controllers remain frozen. Keep Light installation marked complete and LINK writes disabled; three-app runtime-source parity awaits Case's integration/tests/merged source.
+
 ## 2026-10-01 — Light installation complete; Case source adoption still pending
 
 This supersedes the older bench-installation status below. Light1.5.0 is installed in inventory-only mode with inactive profiles and closed USB streams; its installed updater and private mirror were verified. The owner is now running a real benchmark and has frozen further bench changes. Keep all installed apps, controllers and workloads untouched; remaining integration is local source/simulated work and ordinary source publication only.
