@@ -118,6 +118,9 @@
     <Compile Include="CoolingControllersWindow.cs" />
     <Compile Include="..\shared\CorsairCore.cs"><Link>Shared\CorsairCore.cs</Link></Compile>
     <Compile Include="..\shared\CoolingUsbDiscovery.cs"><Link>Shared\CoolingUsbDiscovery.cs</Link></Compile>
+    <Compile Include="..\shared\BeQuietIoTelemetry.cs"><Link>Shared\BeQuietIoTelemetry.cs</Link></Compile>
+    <Compile Include="..\shared\BeQuietIoDirect.cs"><Link>Shared\BeQuietIoDirect.cs</Link></Compile>
+    <Compile Include="..\shared\BeQuietIoController.cs"><Link>Shared\BeQuietIoController.cs</Link></Compile>
     <Compile Include="CorsairLightingProtocolConstants.cs" />
     <Compile Include="Control\FanRpmHoldController.cs" />
     <Compile Include="Control\PwmAcquisitionModels.cs" />

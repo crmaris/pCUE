@@ -3,6 +3,8 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Diagnostics;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows;
@@ -37,6 +39,7 @@ namespace pCUE
     public sealed class CoolingControllerSetup
     {
         public string DeviceId { get; set; }
+        public string ChildSerial { get; set; }
         public CoolingOutputRow[] Outputs { get; set; }
     }
     public sealed class CoolingControllersWindow : Window
@@ -44,6 +47,7 @@ namespace pCUE
         static readonly string Folder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "pCUE", "controllers");
         static readonly string RecoveryPath = Path.Combine(Folder, "recovery.json");
         static readonly string SetupPath = Path.Combine(Folder, "setup.json");
+        public static bool HasSavedRecovery { get { return File.Exists(RecoveryPath); } }
         readonly JavaScriptSerializer json = new JavaScriptSerializer();
         readonly ObservableCollection<CoolingOutputRow> rows = new ObservableCollection<CoolingOutputRow>();
         readonly ComboBox devices = new ComboBox { MinWidth = 350, FontSize = 15 };
@@ -51,7 +55,8 @@ namespace pCUE
         readonly TextBlock status = new TextBlock { TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 14, 0, 12) };
         readonly Button connect, apply, restore, refresh;
         readonly DispatcherTimer timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-        CoreController controller;
+        INativeCoolingController controller;
+        long uiHeartbeat = Stopwatch.GetTimestamp();
         CoolingUsbInfo selected;
         CoolingControllerRecovery recovery;
         CoolingControllerSetup saved;
@@ -78,10 +83,10 @@ namespace pCUE
             grid.Columns.Add(new DataGridComboBoxColumn { Header = "Type", ItemsSource = new[] { "Fan", "Pump" }, SelectedItemBinding = new Binding("Role"), Width = 105 });
             TextColumn("Min %", "Minimum", 75, false); TextColumn("Manual %", "Percent", 105, false);
             Grid.SetRow(grid, 3); layout.Children.Add(grid);
-            var instructions = new TextBlock { Text = "Identify the outputs before enabling them. Pump setup defaults to 100% with a 60% minimum.\nManual commands use percentages; stored firmware curves and unselected outputs are preserved.\nCORE/XT control is available only when firmware settings can be captured and verified.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 16, 0, 16), Foreground = Brushes.LightGray }; Grid.SetRow(instructions, 4); layout.Children.Add(instructions);
+            var instructions = new TextBlock { Text = "Identify the outputs before enabling them. Pump setup defaults to 100% with a 60% minimum.\nCORE/XT preserve stored curves and unselected outputs. IO claims its pump and fan bank together;\nIO recovery restores the fan bank and control mode, and leaves the pump at 100%.", TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 16, 0, 16), Foreground = Brushes.LightGray }; Grid.SetRow(instructions, 4); layout.Children.Add(instructions);
             var actions = new StackPanel { Orientation = Orientation.Horizontal }; Grid.SetRow(actions, 5); layout.Children.Add(actions);
             apply = ActionButton("Apply selected outputs", Apply); restore = ActionButton("Stop / restore", Restore); actions.Children.Add(apply); actions.Children.Add(restore);
-            timer.Tick += async delegate { if (!busy && controller != null) await Poll(); };
+            timer.Tick += async delegate { Interlocked.Exchange(ref uiHeartbeat, Stopwatch.GetTimestamp()); if (!busy && controller != null) await Poll(); };
             Closing += ClosingWindow; Closed += delegate { timer.Stop(); if (controller != null) controller.Dispose(); };
             if (preview)
             {
@@ -111,7 +116,7 @@ namespace pCUE
                 var found = await Task.Run(CoolingUsbDiscovery.Find); devices.ItemsSource = found;
                 if (saved != null && saved.DeviceId != null) devices.SelectedItem = found.FirstOrDefault(d => d.Id == saved.DeviceId);
                 else if (found.Length == 1) devices.SelectedIndex = 0;
-                status.Text = found.Length == 0 ? "No supported CORE/XT controller found." : devices.SelectedItem == null ? "Choose the controller to use. A missing saved controller is never substituted." : "Ready to connect. New outputs remain unchecked.";
+                status.Text = found.Length == 0 ? "No supported cooling controller found." : devices.SelectedItem == null ? "Choose the controller to use. A missing saved controller is never substituted." : "Ready to connect. New outputs remain unchecked.";
             } catch (Exception ex) { status.Text = ex.Message; }
             finally { busy = false; Buttons(); }
         }
@@ -121,15 +126,16 @@ namespace pCUE
             busy = true; Buttons();
             try
             {
-                controller = await Task.Run(delegate { return CoolingUsbDiscovery.Open(selected); }); var state = await Task.Run(controller.Read); rows.Clear();
+                if (saved != null && saved.DeviceId == selected.Id) selected.ChildSerial = saved.ChildSerial;
+                controller = await Task.Run(delegate { return CoolingUsbDiscovery.Open(selected); }); var state = await Task.Run(controller.Read); selected.ChildSerial = state.ChildSerial; rows.Clear();
                 for (int i = 0; i < controller.Count; i++)
                 {
                     var old = saved != null && saved.DeviceId == selected.Id && saved.Outputs != null ? saved.Outputs.FirstOrDefault(r => r.Channel == i) : null;
-                    rows.Add(new CoolingOutputRow { Channel = i, Name = controller.HasExt ? (i == 0 ? "AIO / EXT pump" : "Fan " + i) : "Fan " + (i + 1), Minimum = old == null ? 30 : old.Minimum, Percent = old == null ? 40 : old.Percent, Role = old == null ? "Fan" : old.Role, Enabled = old != null && old.Enabled });
+                    rows.Add(new CoolingOutputRow { Channel = i, Name = selected.Kind == "bequiet" ? (i == 0 ? "IO pump" : "IO fan bank") : controller.HasExt ? (i == 0 ? "AIO / EXT pump" : "Fan " + i) : "Fan " + (i + 1), Minimum = old == null ? 30 : old.Minimum, Percent = old == null ? 40 : old.Percent, Role = old == null ? "Fan" : old.Role, Enabled = old != null && old.Enabled });
                     if (old != null) { rows.Last().Minimum = old.Minimum; rows.Last().Percent = old.Percent; }
                 }
                 Present(state); previous = Enumerable.Repeat(-1, controller.Count).ToArray();
-                Save(SetupPath, json.Serialize(new CoolingControllerSetup { DeviceId = selected.Id, Outputs = rows.ToArray() }));
+                Save(SetupPath, json.Serialize(new CoolingControllerSetup { DeviceId = selected.Id, ChildSerial = selected.ChildSerial, Outputs = rows.ToArray() }));
             } catch (Exception ex) { status.Text = ex.Message; if (controller != null) controller.Dispose(); controller = null; }
             finally { busy = false; Buttons(); }
         }
@@ -151,13 +157,14 @@ namespace pCUE
             var managed = rows.Where(r => r.Enabled).ToArray();
             if (managed.Length == 0 || managed.Any(r => !r.CanControl || r.Minimum < 20 || r.Minimum > 100 || r.Percent < r.Minimum || r.Percent > 100 || (r.Role != "Fan" && r.Role != "Pump"))) { status.Text = "Enable verified outputs and use whole percentages within their minimum and 100%."; return; }
             bool[] mask = rows.Select(r => r.Enabled).ToArray();
+            if (selected.Kind == "bequiet" && !ValidIoPair(rows.ToArray())) { status.Text = "IO requires both outputs: identify output 1 as Pump (minimum 25%) and output 2 as Fan."; return; }
             if (recovery != null && !mask.SequenceEqual(recovery.Baseline.Selected)) { status.Text = "Stop / restore before changing the selected outputs."; return; }
             busy = writing = true; Buttons();
             try
             {
                 if (recovery == null) { var baseline = await Task.Run(delegate { return controller.Capture(mask); }); var next = new CoolingControllerRecovery { Device = selected, Baseline = baseline }; Save(RecoveryPath, json.Serialize(next)); recovery = next; }
-                int[] desired = rows.Select(r => r.Enabled ? r.Percent : -1).ToArray(); await Task.Run(delegate { controller.Apply(desired, previous, null); }); previous = desired;
-                Save(SetupPath, json.Serialize(new CoolingControllerSetup { DeviceId = selected.Id, Outputs = rows.ToArray() })); status.Text = "Selected output percentages applied and verified. Stop / restore returns the captured settings.";
+                int[] desired = rows.Select(r => r.Enabled ? r.Percent : -1).ToArray(); await Task.Run(delegate { controller.Apply(desired, previous, UiResponsive); }); previous = desired;
+                Save(SetupPath, json.Serialize(new CoolingControllerSetup { DeviceId = selected.Id, ChildSerial = selected.ChildSerial, Outputs = rows.ToArray() })); status.Text = selected.Kind == "bequiet" ? "IO pair applied and verified. Stop / restore returns fan bank and mode, leaving pump at 100%." : "Selected output percentages applied and verified. Stop / restore returns the captured settings.";
             } catch (Exception ex) { status.Text = "Control failed; restore saved settings. " + ex.Message; }
             finally { busy = writing = false; Buttons(); }
         }
@@ -167,7 +174,7 @@ namespace pCUE
             try
             {
                 if (recovery == null) recovery = json.Deserialize<CoolingControllerRecovery>(File.ReadAllText(RecoveryPath));
-                if (controller == null) { selected = recovery.Device; controller = await Task.Run(delegate { return CoolingUsbDiscovery.Open(selected); }); }
+                if (controller == null) { selected = recovery.Device; selected.ChildSerial = recovery.Baseline.ChildSerial; controller = await Task.Run(delegate { return CoolingUsbDiscovery.Open(selected); }); }
                 await Task.Run(delegate { controller.Restore(recovery.Baseline); }); File.Delete(RecoveryPath); recovery = null; previous = null; controller.Dispose(); controller = null; rows.Clear(); status.Text = "Stopped · Saved controller settings restored. Connect to monitor again.";
             } catch (Exception ex) { status.Text = "Recovery incomplete. Saved settings are retained. " + ex.Message; }
             finally { busy = writing = false; Buttons(); }
@@ -184,6 +191,11 @@ namespace pCUE
             if (Validation.GetHasError(node)) return true;
             for (int i = 0; i < VisualTreeHelper.GetChildrenCount(node); i++) if (HasInputError(VisualTreeHelper.GetChild(node, i))) return true;
             return false;
+        }
+        bool UiResponsive() { return !closing && (Stopwatch.GetTimestamp() - Interlocked.Read(ref uiHeartbeat)) / (double)Stopwatch.Frequency < 10; }
+        internal static bool ValidIoPair(CoolingOutputRow[] outputs)
+        {
+            return outputs.Length == 2 && outputs.All(r => r.Enabled) && outputs[0].Channel == 0 && outputs[1].Channel == 1 && outputs[0].Role == "Pump" && outputs[0].Minimum >= 25 && outputs[0].Percent >= 25 && outputs[1].Role == "Fan";
         }
     }
 }

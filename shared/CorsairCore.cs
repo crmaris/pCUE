@@ -8,11 +8,21 @@ using HidSharp;
 
 namespace Pcue.Cooling
 {
+    public interface INativeCoolingController : IDisposable
+    {
+        int Count { get; }
+        bool HasExt { get; }
+        CoreState Read();
+        CoreBaseline Capture(bool[] selected);
+        void Apply(int[] desired, int[] previous, Func<bool> allowed);
+        void Restore(CoreBaseline baseline);
+    }
     public interface ICoreTransport : IDisposable { byte[] Exchange(byte[] command, byte[] data); }
     public sealed class CoreRejectedException : IOException { public CoreRejectedException(string message) : base(message) { } }
     public sealed class CoreState
     {
         public string Firmware;
+        public string ChildSerial;
         public bool[] Connected;
         public int?[] Rpm;
         public double?[] Temperatures;
@@ -24,6 +34,8 @@ namespace Pcue.Cooling
     {
         public bool[] Selected;
         public int[] Modes, Powers;
+        public int? GlobalMode;
+        public string ChildSerial;
     }
     public static class CoreProtocol
     {
@@ -78,7 +90,7 @@ namespace Pcue.Cooling
         }
         public void Dispose() { stream.Dispose(); }
     }
-    public sealed class CoreController : IDisposable
+    public sealed class CoreController : INativeCoolingController
     {
         const byte Handle = 0xf7;
         readonly ICoreTransport transport;

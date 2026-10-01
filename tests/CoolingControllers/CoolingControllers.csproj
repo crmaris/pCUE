@@ -13,6 +13,10 @@
     <Reference Include="PresentationFramework" /><Reference Include="PresentationCore" /><Reference Include="WindowsBase" /><Reference Include="System.Xaml" />
     <Reference Include="HidSharp"><HintPath>..\..\packages\HidSharp.2.1.0\lib\net35\HidSharp.dll</HintPath></Reference>
     <Compile Include="Program.cs" /><Compile Include="CoreBackendTests.cs" />
+    <Compile Include="BeQuietBackendTests.cs" />
+    <Compile Include="..\..\shared\BeQuietIoTelemetry.cs" Link="BeQuietIoTelemetry.cs" />
+    <Compile Include="..\..\shared\BeQuietIoDirect.cs" Link="BeQuietIoDirect.cs" />
+    <Compile Include="..\..\shared\BeQuietIoController.cs" Link="BeQuietIoController.cs" />
     <Compile Include="..\..\shared\CorsairCore.cs" Link="CorsairCore.cs" />
     <Compile Include="..\..\shared\CoolingUsbDiscovery.cs" Link="CoolingUsbDiscovery.cs" />
     <Compile Include="..\..\pCUE\CoolingControllersWindow.cs" Link="CoolingControllersWindow.cs" />
