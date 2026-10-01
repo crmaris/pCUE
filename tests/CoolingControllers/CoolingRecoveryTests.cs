@@ -69,6 +69,8 @@ static class CoolingRecoveryTests
             Check(!panel.IsVisible, "Recovery tests displayed a window.");
             Console.WriteLine("PASS: cooling recovery retries after USB loss, failed open/restore, disposal error, exact identity and unselected preservation (simulated; no USB).");
             RunIoRecovery(scratch + "-io");
+            RunBoardRecovery(scratch + "-board");
+            RunOctoRecovery(scratch + "-octo");
         }
         finally
         {
@@ -93,12 +95,63 @@ static class CoolingRecoveryTests
             fake.Reject = true; rows[1].Percent = 75; RunOperation(panel, "Apply");
             Check(Field(panel, "controller") != null && !fake.Disposed && opens == 1 && File.ReadAllText(record) == original, "Failed IO command released the live owner or overwrote baseline.");
             RunOperation(panel, "Restore"); Check(panel.PendingRecovery && Field(panel, "controller") != null && !fake.Disposed && File.ReadAllText(record) == original, "Failed IO restore lost ownership/recovery.");
-            fake.Reject = false; RunOperation(panel, "Restore");
+            fake.Reject = false; RunOperation(panel, "Poll");
+            Check(!((Button)Field(panel,"apply")).IsEnabled && rows.All(r => !r.CanControl), "A healthy poll re-enabled writes before failed recovery was restored.");
+            RunOperation(panel, "Restore");
             Check(!panel.PendingRecovery && fake.Disposed && fake.Pump == 100 && fake.Fan == 48 && fake.Mode == 0 && !File.Exists(record), "IO restore failed to return bank/mode/full pump and release owner.");
             Check(!panel.IsVisible, "IO recovery test displayed a window.");
             Console.WriteLine("PASS: actual IO panel saves child recovery, retains owner after failed Apply/Restore, and clears it only after verified restoration (simulated; no USB).");
         }
         finally { typeof(CoolingControllersWindow).GetMethod("ReleaseController", Private).Invoke(panel, null); typeof(CoolingControllersWindow).GetField("recovery", Private).SetValue(panel, null); if (Directory.Exists(scratch)) Directory.Delete(scratch, true); panel.Close(); }
+    }
+    static void RunOctoRecovery(string scratch)
+    {
+        var fake=new PeripheralBackendTests.Octo(1631); byte[] original=(byte[])fake.Report.Clone(); int opens=0;
+        var identity=new CoolingUsbInfo {Kind="octo",Product=0xf011,Id=CoolingUsbDiscovery.Identity("octo","fake-octo"),Path="fake-octo",Name="Example OCTO",Outputs=8};
+        var panel=new CoolingControllersWindow(false,scratch,requested=>{Check(requested.Id==identity.Id,"OCTO recovery substituted device.");opens++;return new OctoCoolingController(fake,requested.ChildSerial);});
+        try {
+            var devices=(ComboBox)Field(panel,"devices");devices.Items.Add(identity);devices.SelectedIndex=0;RunOperation(panel,"Connect");
+            var rows=(ObservableCollection<CoolingOutputRow>)Field(panel,"rows");Check(rows.Count==8 && rows[7].Name=="OCTO fan 8","OCTO output inventory/names");
+            rows[0].Enabled=rows[3].Enabled=true;rows[0].Percent=60;rows[3].Percent=80;RunOperation(panel,"Apply");
+            string record=Path.Combine(scratch,"recovery.json"), saved=File.ReadAllText(record);Check(panel.PendingRecovery && saved.Contains("Report") && fake.Report[OctoReports.Offset(fake.Report,3)]==0,"Actual OCTO panel did not capture raw report before control.");
+            fake.Ignore=true;rows[3].Percent=90;RunOperation(panel,"Apply");Check(Field(panel,"controller")==null && File.ReadAllText(record)==saved,"Failed OCTO apply retained handle or altered baseline.");
+            fake.Ignore=false;fake.Report[OctoReports.Offset(fake.Report,1)]=9;OctoReports.Word(fake.Report,fake.Report.Length-2,OctoReports.Checksum(fake.Report));RunOperation(panel,"Restore");
+            Check(opens==2 && !panel.PendingRecovery && fake.Report[OctoReports.Offset(fake.Report,3)]==original[OctoReports.Offset(original,3)] && fake.Report[OctoReports.Offset(fake.Report,1)]==9,"Actual OCTO reconnect restore lost raw mode or unselected settings.");
+            Check(!panel.IsVisible,"OCTO test displayed window.");Console.WriteLine("PASS: actual OCTO panel saves raw selected recovery, reopens exact identity after failure, and restores original modes while preserving unrelated settings (simulated).");
+        } finally {typeof(CoolingControllersWindow).GetMethod("ReleaseController",Private).Invoke(panel,null);typeof(CoolingControllersWindow).GetField("recovery",Private).SetValue(panel,null);if(Directory.Exists(scratch))Directory.Delete(scratch,true);panel.Close();}
+    }
+    static void RunBoardRecovery(string scratch)
+    {
+        var first = new PeripheralBackendTests.Board("board:fake/header/0", "Software", 33.25f);
+        var second = new PeripheralBackendTests.Board("board:fake/header/2", "Undefined", 0);
+        var identity = new CoolingUsbInfo { Kind="board", Id=CoolingUsbDiscovery.Identity("board","fake-board:chip"), Path="fake-board:chip", Name="Example mainboard", Outputs=3 };
+        var other = new CoolingUsbInfo { Kind="board", Id=CoolingUsbDiscovery.Identity("board","other-board:chip"), Path="other-board:chip", Name="Other mainboard", Outputs=3 };
+        CoolingUsbInfo[] catalog = {identity,other}; int released=0;
+        Func<CoolingUsbInfo,INativeCoolingController> open = requested => {
+            Check(requested.Id==identity.Id,"Mainboard selected a substitute.");
+            return new MotherboardCoolingController(identity.Id,new IBoardControlPort[]{first,null,second},()=>released++);
+        };
+        var panel=new CoolingControllersWindow(false,scratch,open,()=>catalog);
+        try {
+            var devices=(ComboBox)Field(panel,"devices"); devices.Items.Add(identity); devices.SelectedIndex=0; RunOperation(panel,"Connect");
+            var rows=(ObservableCollection<CoolingOutputRow>)Field(panel,"rows"); Check(rows.Count==3 && rows[0].Name==first.Name && !rows[1].CanControl,"Mainboard names/sparse topology failed.");
+            rows[0].Enabled=rows[2].Enabled=true; rows[0].Percent=60; rows[2].Percent=80; second.MissingReadback=true;
+            RunOperation(panel,"Apply"); string record=Path.Combine(scratch,"recovery.json"); string original=File.ReadAllText(record);
+            Check(original.Contains("33.25") && panel.PendingRecovery && released==0 && Field(panel,"controller")!=null,"Partial motherboard command lost fractional baseline/owner.");
+            second.MissingReadback=false; RunOperation(panel,"Poll"); int writes=first.Writes+second.Writes; RunOperation(panel,"Apply");
+            Check(first.Writes+second.Writes==writes && !((Button)Field(panel,"apply")).IsEnabled && File.ReadAllText(record)==original,"Polling reopened mainboard writes or altered recovery.");
+            RunOperation(panel,"Restore"); Check(!panel.PendingRecovery && released==1 && first.SoftwareValue==33.25f && second.Mode=="Default","Actual mainboard UI restore/owner release failed.");
+            var remembered=new CoolingControllersWindow(false,scratch,open,()=>catalog);
+            try {
+                RunOperation(remembered,"Discover"); var picker=(ComboBox)Field(remembered,"devices"); Check(((CoolingUsbInfo)picker.SelectedItem).Id==identity.Id,"Last mainboard was not remembered among several controllers.");
+                catalog=new[]{other}; RunOperation(remembered,"Discover"); Check(picker.SelectedItem==null,"Missing remembered controller was replaced automatically.");
+                Check(!remembered.IsVisible,"Selection test displayed a window.");
+            } finally { remembered.Close(); }
+            Console.WriteLine("PASS: actual mainboard UI remembers exact controller, saves fractional recovery before writes, retains failed owner, blocks writes after polling, restores software/BIOS and refuses substitution (simulated).");
+        } finally {
+            typeof(CoolingControllersWindow).GetMethod("ReleaseController",Private).Invoke(panel,null); typeof(CoolingControllersWindow).GetField("recovery",Private).SetValue(panel,null);
+            if(Directory.Exists(scratch)) Directory.Delete(scratch,true); panel.Close();
+        }
     }
     sealed class IoClient : IBeQuietControlClient
     {

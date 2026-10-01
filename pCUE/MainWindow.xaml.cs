@@ -782,7 +782,7 @@ namespace pCUE
             {
                 SetStatus("Use This PC and close Commander PRO / release acquisition before opening cooling controllers.", UpdateAlertBrush); return;
             }
-            try { coolingControllersWindow = new CoolingControllersWindow { Owner = this }; coolingControllersWindow.ShowDialog(); }
+            try { coolingControllersWindow = new CoolingControllersWindow(thisComputer) { Owner = this }; coolingControllersWindow.ShowDialog(); }
             finally { coolingControllersWindow = null; }
         }
 

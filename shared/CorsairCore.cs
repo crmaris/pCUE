@@ -23,6 +23,7 @@ namespace Pcue.Cooling
     {
         public string Firmware;
         public string ChildSerial;
+        public string[] OutputNames;
         public bool[] Connected;
         public int?[] Rpm;
         public double?[] Temperatures;
@@ -36,6 +37,8 @@ namespace Pcue.Cooling
         public int[] Modes, Powers;
         public int? GlobalMode;
         public string ChildSerial;
+        public byte[] Report;
+        public BoardControlBaseline[] Board;
     }
     public static class CoreProtocol
     {

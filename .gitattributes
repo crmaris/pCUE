@@ -7,6 +7,7 @@
 shared/* text eol=lf
 tests/CoolingControllers/CoreBackendTests.cs text eol=lf
 tests/CoolingControllers/BeQuietBackendTests.cs text eol=lf
+tests/CoolingControllers/PeripheralBackendTests.cs text eol=lf
 
 # Binaries shipped or referenced by this repo: never normalize or merge them.
 *.ico binary
