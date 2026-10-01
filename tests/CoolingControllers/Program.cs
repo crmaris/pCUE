@@ -18,10 +18,14 @@ static class Program
         try
         {
             CoreBackendTests.Run();
+            BeQuietBackendTests.Run();
+
             CoolingRecoveryTests.Run();
             var row = new CoolingOutputRow { Minimum = 30, Percent = 40 }; row.Role = "Pump";
             Check(row.Minimum == 60 && row.Percent == 100 && !row.Enabled, "Pump defaults/opt-in.");
             row.Percent = 75; row.Role = "Pump"; Check(row.Percent == 75, "Existing pump percentage reset.");
+            var ioPair = new[] { new CoolingOutputRow { Channel = 0, Role = "Pump", Minimum = 25, Percent = 100, Enabled = true }, new CoolingOutputRow { Channel = 1, Role = "Fan", Enabled = true } };
+            Check(CoolingControllersWindow.ValidIoPair(ioPair), "Commissioned IO pair rejected."); ioPair[1].Enabled = false; Check(!CoolingControllersWindow.ValidIoPair(ioPair), "Fan-only IO claim accepted."); ioPair[1].Enabled = true; ioPair[0].Minimum = 20; Check(!CoolingControllersWindow.ValidIoPair(ioPair), "IO pump below commissioned range accepted.");
             var invalid = new TextBox(); invalid.SetBinding(TextBox.TextProperty, new Binding("Percent") { Source = row, Mode = BindingMode.TwoWay, UpdateSourceTrigger = UpdateSourceTrigger.PropertyChanged, ValidatesOnExceptions = true });
             invalid.Text = "not a percentage"; invalid.GetBindingExpression(TextBox.TextProperty).UpdateSource();
             Check(Validation.GetHasError(invalid), "Invalid percentage was silently accepted.");

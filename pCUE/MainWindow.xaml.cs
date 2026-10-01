@@ -2739,8 +2739,10 @@ namespace pCUE
 
         //Download (verified) then, after a second explicit confirmation, launch the installer and
         //close pCUE - a running app cannot overwrite its own files.
+        private bool CanInstallCoolingUpdate { get { return coolingControllersWindow == null && !CoolingControllersWindow.HasSavedRecovery && !AcquisitionLeased && (rpmHold == null || !rpmHold.IsRunning); } }
         private async Task OfferUpdate(AppUpdateInfo info)
         {
+            if (!CanInstallCoolingUpdate) { SetUpdateStatus("Stop RPM hold/acquisition and restore/close cooling controllers before installing an update.", UpdateAlertBrush); return; }
             MessageBoxResult wants = MessageBox.Show(
                 info.Message + "\n\nDownload it now?",
                 "pCUE update available", MessageBoxButton.YesNo, MessageBoxImage.Question);
@@ -2777,6 +2779,8 @@ namespace pCUE
 
             try
             {
+                // Ownership may change during download or either confirmation.
+                if (!CanInstallCoolingUpdate) { SetUpdateStatus("Cooling is busy or recovery is pending. Installer was not launched.", UpdateAlertBrush); return; }
                 Process.Start(new ProcessStartInfo(installer) { UseShellExecute = true });
                 suppressCloseConfirm = true;    //the user already confirmed; skip "Really close?"
                 Application.Current.Shutdown();

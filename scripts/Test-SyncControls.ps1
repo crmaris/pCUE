@@ -71,6 +71,7 @@ try {
     $panelField = $window.GetType().GetField('coolingControllersWindow', $privateFlags)
     try {
         $panelField.SetValue($window, $panel)
+        if ($window.GetType().GetProperty('CanInstallCoolingUpdate', $privateFlags).GetValue($window, $null)) { throw 'Controller panel allowed an update installation.' }
         if (-not $window.SetCommanderOpen($true)) { throw 'Controller panel allowed a PRO open.' }
         $window.GetType().GetField('suppressCloseConfirm', $privateFlags).SetValue($window, $true)
         $closingArgs = New-Object System.ComponentModel.CancelEventArgs

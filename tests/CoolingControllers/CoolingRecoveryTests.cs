@@ -68,6 +68,7 @@ static class CoolingRecoveryTests
             Check(state.Powers[0] == 40 && state.Modes[0] == 2 && state.Powers[1] == 67, "Reconnected restore lost selected baseline or changed an unselected output.");
             Check(!panel.IsVisible, "Recovery tests displayed a window.");
             Console.WriteLine("PASS: cooling recovery retries after USB loss, failed open/restore, disposal error, exact identity and unselected preservation (simulated; no USB).");
+            RunIoRecovery(scratch + "-io");
         }
         finally
         {
@@ -76,6 +77,38 @@ static class CoolingRecoveryTests
             if (Directory.Exists(scratch)) Directory.Delete(scratch, true);
             panel.Close(); SynchronizationContext.SetSynchronizationContext(oldContext);
         }
+    }
+    static void RunIoRecovery(string scratch)
+    {
+        var fake = new IoClient();
+        var identity = CoolingUsbDiscovery.Describe(0x373f, 0x0010, "simulated-hid&mi_00", 65, 65); identity.BridgeSerial = "FAKEBRIDGE";
+        int opens = 0;
+        var panel = new CoolingControllersWindow(false, scratch, delegate(CoolingUsbInfo requested) { Check(requested.Id == identity.Id, "IO UI selected a replacement bridge."); opens++; return new BeQuietIoController(fake, false); });
+        try
+        {
+            var devices = (ComboBox)Field(panel, "devices"); devices.Items.Add(identity); devices.SelectedIndex = 0; RunOperation(panel, "Connect");
+            var rows = (ObservableCollection<CoolingOutputRow>)Field(panel, "rows"); rows[0].Role = "Pump"; rows[0].Enabled = rows[1].Enabled = true; rows[1].Percent = 67;
+            RunOperation(panel, "Apply"); string record = Path.Combine(scratch, "recovery.json"); string original = File.ReadAllText(record);
+            Check(panel.PendingRecovery && fake.Fan == 67 && fake.Mode == 1 && original.Contains("ABCDEF123456"), "IO did not save exact child baseline before control.");
+            fake.Reject = true; rows[1].Percent = 75; RunOperation(panel, "Apply");
+            Check(Field(panel, "controller") != null && !fake.Disposed && opens == 1 && File.ReadAllText(record) == original, "Failed IO command released the live owner or overwrote baseline.");
+            RunOperation(panel, "Restore"); Check(panel.PendingRecovery && Field(panel, "controller") != null && !fake.Disposed && File.ReadAllText(record) == original, "Failed IO restore lost ownership/recovery.");
+            fake.Reject = false; RunOperation(panel, "Restore");
+            Check(!panel.PendingRecovery && fake.Disposed && fake.Pump == 100 && fake.Fan == 48 && fake.Mode == 0 && !File.Exists(record), "IO restore failed to return bank/mode/full pump and release owner.");
+            Check(!panel.IsVisible, "IO recovery test displayed a window.");
+            Console.WriteLine("PASS: actual IO panel saves child recovery, retains owner after failed Apply/Restore, and clears it only after verified restoration (simulated; no USB).");
+        }
+        finally { typeof(CoolingControllersWindow).GetMethod("ReleaseController", Private).Invoke(panel, null); typeof(CoolingControllersWindow).GetField("recovery", Private).SetValue(panel, null); if (Directory.Exists(scratch)) Directory.Delete(scratch, true); panel.Close(); }
+    }
+    sealed class IoClient : IBeQuietControlClient
+    {
+        public int Pump = 100, Fan = 48, Mode; public bool Reject, Disposed;
+        public string Error { get { return null; } } public string CoolerSerial { get { return "ABCDEF123456"; } } public string FirmwareVersion { get { return "0.0.37"; } }
+        public BeQuietIoReading[] Fresh { get { return new[] { new BeQuietIoReading { Channel = 1, RawValue = 2900 }, new BeQuietIoReading { Channel = 2, RawValue = 1000 }, new BeQuietIoReading { Channel = 3, RawValue = 0 } }; } }
+        public int ReadDuty(int channel) { return channel == 1 ? Pump : Fan; } public int ReadCoolingMode() { return Mode; }
+        public void SetDuty(int channel, int value, Func<bool> allowed = null) { if (Reject || (allowed != null && !allowed())) throw new IOException("Simulated IO write refused."); if (channel == 1) Pump = value; else Fan = value; }
+        public void SetSoftwareControl(bool value, Func<bool> allowed = null) { if (Reject || (allowed != null && !allowed())) throw new IOException("Simulated mode refused."); Mode = value ? 1 : 0; }
+        public void Heartbeat() { } public void Status() { } public void Dispose() { Disposed = true; }
     }
     sealed class DeviceState
     {
