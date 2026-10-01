@@ -19,6 +19,7 @@ static class Program
         {
             CoreBackendTests.Run();
             BeQuietBackendTests.Run();
+            PeripheralBackendTests.Run();
 
             CoolingRecoveryTests.Run();
             var row = new CoolingOutputRow { Minimum = 30, Percent = 40 }; row.Role = "Pump";

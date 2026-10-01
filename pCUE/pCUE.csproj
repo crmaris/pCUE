@@ -116,6 +116,8 @@
     </Compile>
     <Compile Include="CommanderProDevice.cs" />
     <Compile Include="CoolingControllersWindow.cs" />
+    <Compile Include="..\shared\OctoCoolingController.cs"><Link>Shared\OctoCoolingController.cs</Link></Compile>
+    <Compile Include="..\shared\MotherboardCoolingController.cs"><Link>Shared\MotherboardCoolingController.cs</Link></Compile>
     <Compile Include="..\shared\CorsairCore.cs"><Link>Shared\CorsairCore.cs</Link></Compile>
     <Compile Include="..\shared\CoolingUsbDiscovery.cs"><Link>Shared\CoolingUsbDiscovery.cs</Link></Compile>
     <Compile Include="..\shared\BeQuietIoTelemetry.cs"><Link>Shared\BeQuietIoTelemetry.cs</Link></Compile>

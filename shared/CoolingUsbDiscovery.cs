@@ -41,8 +41,20 @@ namespace Pcue.Cooling
             }
             return result.OrderBy(d => d.Id).ToArray();
         }
+        public static CoolingUsbInfo[] FindAll(LibreHardwareMonitor.Hardware.Computer host = null)
+        {
+            var found = new List<CoolingUsbInfo>(Find());
+            foreach (var d in DeviceList.Local.GetHidDevices(0x0c70, 0xf011))
+                try { if (OctoReports.SettingsLength(d.GetMaxFeatureReportLength()) && OctoReports.StatusLength(d.GetMaxInputReportLength())) found.Add(new CoolingUsbInfo { Id = Identity("octo", d.DevicePath), Kind = "octo", Path = d.DevicePath, Product = 0xf011, Outputs = 8, Name = "Aquacomputer OCTO" }); } catch { }
+            if (host != null) found.AddRange(MotherboardCoolingController.Find(host));
+            return found.OrderBy(d => d.Id).ToArray();
+        }
         public static INativeCoolingController Open(CoolingUsbInfo info)
         {
+            if (info != null && info.Path != null && info.Id == Identity(info.Kind, info.Path)) {
+                if (info.Kind == "octo" && info.Product == 0xf011) return new OctoCoolingController(new OctoHidTransport(info.Path),info.ChildSerial);
+                if (info.Kind == "board") throw new System.IO.InvalidDataException("Motherboard connections must use the application's existing hardware monitor.");
+            }
             if (info != null && info.Path != null && info.Kind == "bequiet" && info.Product == 0x0010 && info.Id == Identity(info.Kind, info.Path)) return new BeQuietIoController(info.Path, info.BridgeSerial, info.ChildSerial);
             if (info == null || info.Path == null || (info.Kind != "core" && info.Kind != "corext") || info.Id != Identity(info.Kind, info.Path) || info.Product != (info.Kind == "core" ? 0x0c1c : 0x0c2a)) throw new System.IO.InvalidDataException("CORE identity/product/path mismatch.");
             return new CoreController(info.Kind == "core", new CoreHidTransport(info.Path, info.Product));
