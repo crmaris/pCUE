@@ -1,5 +1,11 @@
 # pCUE — handover (canonical)
 
+## 2026-10-01 — Light installation complete; Case source adoption still pending
+
+This supersedes the older bench-installation status below. Light1.5.0 is installed in inventory-only mode with inactive profiles and closed USB streams; its installed updater and private mirror were verified. The owner is now running a real benchmark and has frozen further bench changes. Keep all installed apps, controllers and workloads untouched; remaining integration is local source/simulated work and ordinary source publication only.
+
+Case's staged7 canonical shared sources/3 conformance suites match revision3, and full pCUE passed the same source-manifest check. Staging does not establish runtime adoption. The unused Case session prototype still needs durable recovery saved before Apply and a write guard tied to live cancellation/run identity. Those review findings and the save-failure/cancellation/partial-recovery verification cases were delivered to its authorized chat. Preserve Case's existing UI/test policy and manual pump0–100 requirement; shared IO's default25 floor remains unchanged here pending explicit policy adaptation. Test/settle/pause requires pump100. All executable/release bytes remain unchanged; no full-app installation or hardware operation occurred. Follow-up stays active until Case integration/conformance/publication is complete; LINK writes stay disabled.
+
 ## 2026-10-01 — 1.7.2 publication verified
 
 PR29 source491ea42f784145a4f1da64148750af31b5c29a1a merged into masterb6e1ec16f39ba578384a16aa37dc37cffe1897b9; remote default ancestry and v1.7.2 tag verified. All four public GitHub release downloads equal prepared local bytes. Anonymous installer also matches SHA68B2EA8825E7384849137CE9C00860DB70497262B378118A0A9B8F931E4973C8. Updater feed PR12 merged6e6b1e74a3e18cf349039387a8bd057d96387ffb; anonymous live components.json reports1.7.2 with matching URL/hash and all unrelated entries preserved. Receipt artifacts/validation-1.7.2/publication.json. package.json distinguishes the pre-change build parent from actual source491ea42: pack built those working changes and auto-stamped1.7.2 before source commit. No registered CI route; validated locally as recorded below. No full-app installation or hardware operations.
