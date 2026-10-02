@@ -30,7 +30,13 @@ namespace Pcue.Cooling
         public const int Wire = 512;         // protocol bytes per report; Windows adds a leading report-ID zero
         public const int Channels = 14;      // chain positions 1..14
         public const int TableSlots = 15;    // stored tables carry slot 0 (the hub itself) plus the 14 channels
-        public const int ModeFixed = 0, ModeCurve = 2, ModeAbsent = 5;
+        public const int ModeFixed = 0, ModeRpm = 1, ModeCurve = 2, ModeAbsent = 5;
+        // One stored value word per channel serves both fixed modes: a percentage in mode 00, an RPM the
+        // hub holds by itself in mode 01. Applications use the same convention: up to 100 is a
+        // percentage, 101 and above is an RPM target. Measured on fans: 940/1100/1580 gave 944/1094/1572.
+        public const int MaxPercent = 100, MaxRpm = 9999;
+        public static bool IsRpm(int value) { return value > MaxPercent; }
+        public static int FixedMode(int value) { return IsRpm(value) ? ModeRpm : ModeFixed; }
 
         public static bool ReportLength(int length) { return length == Wire || length == Wire + 1; }
 
@@ -104,7 +110,8 @@ namespace Pcue.Cooling
             return Enumerable.Range(1, Channels).Select(c => d[1 + c * 3] == 0 ? (int?)Word(d, 2 + c * 3) : null).ToArray();
         }
 
-        // Stored tables 61 6d (type 03, one mode byte per slot) and 62 6d (type 04, one percentage word per slot).
+        // Stored tables 61 6d (type 03, one mode byte per slot) and 62 6d (type 04, one value word per slot:
+        // a percentage when the slot's mode is 00, an RPM when it is 01).
         public static int[] Table(byte[] d, bool words)
         {
             int length = 1 + TableSlots * (words ? 2 : 1);
@@ -113,9 +120,9 @@ namespace Pcue.Cooling
         }
         public static byte[] Encode(int[] values, bool words)
         {
-            if (values == null || values.Length != TableSlots || values.Any(v => v < 0 || v > (words ? 100 : 255))) throw new InvalidDataException("Invalid LINK stored table.");
+            if (values == null || values.Length != TableSlots || values.Any(v => v < 0 || v > (words ? 0xffff : 255))) throw new InvalidDataException("Invalid LINK stored table.");
             var b = new byte[1 + TableSlots * (words ? 2 : 1)]; b[0] = TableSlots;
-            for (int i = 0; i < TableSlots; i++) { if (words) b[1 + i * 2] = (byte)values[i]; else b[1 + i] = (byte)values[i]; }
+            for (int i = 0; i < TableSlots; i++) { if (words) { b[1 + i * 2] = (byte)values[i]; b[2 + i * 2] = (byte)(values[i] >> 8); } else b[1 + i] = (byte)values[i]; }
             return b;
         }
 
@@ -150,7 +157,8 @@ namespace Pcue.Cooling
     }
 
     // Control model, chosen because it is the one that survives this application dying: the hub
-    // stores a mode and a fixed percentage per channel and applies them by itself in hardware mode.
+    // stores a mode and a fixed value per channel - a percentage, or an RPM it regulates to - and
+    // applies them by itself in hardware mode.
     // Software mode is entered only for the duration of one transaction - telemetry and the stored
     // tables are refused in hardware mode - and the hub keeps its outputs steady while it is in it.
     // The vendor application must not be running: it holds the hub in software mode permanently.
@@ -218,7 +226,7 @@ namespace Pcue.Cooling
             {
                 var modes = LinkProtocol.Table(ReadData(0, Handle, new byte[] { 0x61, 0x6d }, 3), false);
                 var powers = LinkProtocol.Table(ReadData(0, Handle, new byte[] { 0x62, 0x6d }, 4), true);
-                if (powers.Any(v => v > 100)) throw new InvalidDataException("LINK fixed percentage is outside 0-100.");
+                for (int i = 0; i < modes.Length; i++) if (modes[i] == LinkProtocol.ModeFixed && powers[i] > LinkProtocol.MaxPercent) throw new InvalidDataException("LINK fixed percentage is outside 0-100.");
                 modeTable = modes; powerTable = powers; s.Modes = modes.Skip(1).ToArray(); s.Powers = powers.Skip(1).ToArray();
             }
             catch (CoreRejectedException ex) { s.ControlError = "LINK stored settings cannot be captured; control is disabled. " + ex.Message; }
@@ -226,10 +234,11 @@ namespace Pcue.Cooling
             return s;
         }
         public CoreState Read() { return Operation(State); }
+        static bool Restorable(int mode) { return mode == LinkProtocol.ModeFixed || mode == LinkProtocol.ModeRpm || mode == LinkProtocol.ModeCurve; }
         static void Selection(bool[] selected, CoreState s)
         {
             if (!s.Writable || selected == null || selected.Length != s.Connected.Length || !selected.Any(v => v)) throw new InvalidDataException("LINK has no valid capture/selection. " + s.ControlError);
-            for (int i = 0; i < selected.Length; i++) if (selected[i] && (!s.Connected[i] || (s.Modes[i] != LinkProtocol.ModeFixed && s.Modes[i] != LinkProtocol.ModeCurve))) throw new IOException("Selected LINK output is absent or uses an unsupported stored mode.");
+            for (int i = 0; i < selected.Length; i++) if (selected[i] && (!s.Connected[i] || !Restorable(s.Modes[i]))) throw new IOException("Selected LINK output is absent or uses an unsupported stored mode.");
         }
         public CoreBaseline Capture(bool[] selected)
         {
@@ -249,7 +258,10 @@ namespace Pcue.Cooling
         }
         void Store(int[] modes, int[] powers, Func<bool> allowed)
         {
-            // Percentage first: a channel must never be switched to fixed mode while it still holds a stale percentage.
+            // Value first: a channel must never be switched to a fixed mode while it still holds a stale value.
+            // Changing between percentage and RPM on a running fan leaves the old mode with the new value
+            // for the ~0.1 s between the two writes; that was measured as harmless on fans. A pump is only
+            // ever given percentages by the applications, so it never crosses that boundary.
             if (!powers.SequenceEqual(powerTable)) WriteData(new byte[] { 0x62, 0x6d }, 4, LinkProtocol.Encode(powers, true), allowed);
             if (!modes.SequenceEqual(modeTable)) WriteData(new byte[] { 0x61, 0x6d }, 3, LinkProtocol.Encode(modes, false), allowed);
             var actualModes = LinkProtocol.Table(ReadData(0, Handle, new byte[] { 0x61, 0x6d }, 3), false); var actualPowers = LinkProtocol.Table(ReadData(0, Handle, new byte[] { 0x62, 0x6d }, 4), true);
@@ -258,13 +270,14 @@ namespace Pcue.Cooling
         }
         public void Apply(int[] desired, int[] previous, Func<bool> allowed)
         {
-            if (desired == null || previous == null || desired.Length != Count || previous.Length != Count || desired.Any(v => v < -1 || v > 100)) throw new InvalidDataException("Invalid LINK duties.");
+            // desired: -1 leaves an output alone, 0..100 is a percentage, 101..MaxRpm is an RPM the hub regulates to.
+            if (desired == null || previous == null || desired.Length != Count || previous.Length != Count || desired.Any(v => v < -1 || v > LinkProtocol.MaxRpm)) throw new InvalidDataException("Invalid LINK duties.");
             Operation(delegate
             {
                 var s = State(); var selected = desired.Select(v => v >= 0).ToArray(); Selection(selected, s);
-                for (int i = 0; i < Count; i++) if (selected[i] && previous[i] >= 0 && (s.Modes[i] != LinkProtocol.ModeFixed || s.Powers[i] != previous[i])) throw new IOException("Another app changed a managed LINK output; restore before restarting.");
+                for (int i = 0; i < Count; i++) if (selected[i] && previous[i] >= 0 && (s.Modes[i] != LinkProtocol.FixedMode(previous[i]) || s.Powers[i] != previous[i])) throw new IOException("Another app changed a managed LINK output; restore before restarting.");
                 var powers = (int[])powerTable.Clone(); var modes = (int[])modeTable.Clone();
-                for (int i = 0; i < Count; i++) if (selected[i]) { powers[i + 1] = desired[i]; modes[i + 1] = LinkProtocol.ModeFixed; }
+                for (int i = 0; i < Count; i++) if (selected[i]) { powers[i + 1] = desired[i]; modes[i + 1] = LinkProtocol.FixedMode(desired[i]); }
                 Store(modes, powers, allowed); return true;
             });
         }
@@ -280,7 +293,7 @@ namespace Pcue.Cooling
                 var powers = (int[])powerTable.Clone(); var modes = (int[])modeTable.Clone();
                 for (int i = 0; i < Count; i++) if (baseline.Selected[i])
                 {
-                    if ((baseline.Modes[i] != LinkProtocol.ModeFixed && baseline.Modes[i] != LinkProtocol.ModeCurve) || baseline.Powers[i] < 0 || baseline.Powers[i] > 100) throw new InvalidDataException("Invalid selected LINK baseline.");
+                    if (!Restorable(baseline.Modes[i]) || baseline.Powers[i] < 0 || baseline.Powers[i] > 0xffff || (baseline.Modes[i] == LinkProtocol.ModeFixed && baseline.Powers[i] > LinkProtocol.MaxPercent)) throw new InvalidDataException("Invalid selected LINK baseline.");
                     powers[i + 1] = baseline.Powers[i]; modes[i + 1] = baseline.Modes[i];
                 }
                 Store(modes, powers, null); return true;
