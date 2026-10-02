@@ -1,5 +1,5 @@
 {
-  "revision": 6,
+  "revision": 7,
   "files": [
     {
       "name": "CorsairCore.cs",
@@ -43,11 +43,11 @@
     },
     {
       "name": "CorsairLink.cs",
-      "sha256": "3BA91B80404E829E7BCE7377F8CFA79333FA2523E0BC1E8A7BAA5443F73C0A69"
+      "sha256": "3100FCCC14D60BF937F00BDF71ECFBE9325CF57EF019F6D291F4A7EEEF35A18B"
     },
     {
       "name": "LinkBackendTests.cs",
-      "sha256": "C095D19B968230211F014FA2D4C7A5B18A1644CE7E5D7C588E77A4C34D1BD738"
+      "sha256": "B4F46605710BD2D154D0582712A019B7F12DA380BD8E4A4D5EBDDE652E909F15"
     }
   ]
 }

@@ -151,7 +151,11 @@ public static class LinkBackendTests
         Reject(delegate { LinkProtocol.Name(new byte[] { 3, 9, 0x41 }); });
         Reject(delegate { LinkProtocol.Readings(new byte[] { 14, 0, 0, 0 }); });
         Reject(delegate { LinkProtocol.Table(new byte[] { 14, 0 }, false); });
-        Reject(delegate { LinkProtocol.Encode(Enumerable.Repeat(101, 15).ToArray(), true); });
+        Reject(delegate { LinkProtocol.Encode(Enumerable.Repeat(0x10000, 15).ToArray(), true); });
+        Reject(delegate { LinkProtocol.Encode(Enumerable.Repeat(256, 15).ToArray(), false); });
+        var wide = new int[15]; wide[1] = 1100; wide[13] = 100; var packed = LinkProtocol.Encode(wide, true);
+        Check(packed[3] == 0x4c && packed[4] == 0x04 && LinkProtocol.Table(packed, true)[1] == 1100 && LinkProtocol.Table(packed, true)[13] == 100, "A stored RPM value lost its high byte.");
+        Check(!LinkProtocol.IsRpm(100) && LinkProtocol.IsRpm(101) && LinkProtocol.FixedMode(100) == LinkProtocol.ModeFixed && LinkProtocol.FixedMode(101) == LinkProtocol.ModeRpm, "The percentage/RPM boundary is not 100/101.");
 
         // --- reading: telemetry, names, no writes, hub handed back in hardware mode ---
         var hub = Bench();
@@ -173,6 +177,20 @@ public static class LinkBackendTests
             Check(hub.Log.IndexOf("write6d62") >= 0 && hub.Log.IndexOf("write6d62") < hub.Log.IndexOf("write6d61"), "Mode was switched to fixed before its percentage was stored.");
             int writes = hub.Writes; link.Apply(desired, desired, delegate { return true; }); Check(hub.Writes == writes, "An unchanged LINK setting was rewritten to the hub's stored tables.");
 
+            // --- 101 and above is an RPM the hub holds itself: mode 01 with the RPM in the value table ---
+            var speed = Enumerable.Repeat(-1, 14).ToArray(); speed[0] = 1100;
+            hub.Log.Clear(); link.Apply(speed, desired, delegate { return true; });
+            Check(hub.Powers[1] == 1100 && hub.Modes[1] == 1 && hub.Modes[13] == 2 && hub.Powers[13] == 0 && hub.Mode == 1, "An RPM target was not stored as fixed-RPM mode, or another output changed.");
+            Check(hub.Log.IndexOf("write6d62") >= 0 && hub.Log.IndexOf("write6d62") < hub.Log.IndexOf("write6d61"), "RPM mode was selected before its value was stored.");
+            var held = link.Read(); Check(held.Writable && held.Modes[0] == LinkProtocol.ModeRpm && held.Powers[0] == 1100, "A stored RPM target is not reported back.");
+            writes = hub.Writes; link.Apply(speed, speed, delegate { return true; }); Check(hub.Writes == writes, "An unchanged RPM target was rewritten.");
+            Reject(delegate { link.Apply(speed, desired, delegate { return true; }); }); Check(hub.Writes == writes, "A percentage record was accepted for an output that holds an RPM.");
+            var faster = Enumerable.Repeat(-1, 14).ToArray(); faster[0] = 1580; link.Apply(faster, speed, delegate { return true; });
+            Check(hub.Powers[1] == 1580 && hub.Modes[1] == 1, "An RPM target could not be changed to another RPM.");
+            link.Apply(desired, faster, delegate { return true; });
+            Check(hub.Powers[1] == 60 && hub.Modes[1] == 0, "Returning from an RPM target to a percentage did not restore fixed-percentage mode.");
+            writes = hub.Writes;
+
             // --- restore returns the captured curve, leaves other channels' later changes alone ---
             hub.Powers[13] = 77; link.Restore(baseline);
             Check(hub.Modes[1] == 2 && hub.Powers[1] == 0 && hub.Powers[13] == 77 && hub.Mode == 1, "Recovery overwrote an unselected output or lost curve mode.");
@@ -183,7 +201,7 @@ public static class LinkBackendTests
             var absent = Enumerable.Range(0, 14).Select(i => i == 5).ToArray(); Reject(delegate { link.Capture(absent); });
             var toAbsent = Enumerable.Repeat(-1, 14).ToArray(); toAbsent[5] = 50; Reject(delegate { link.Apply(toAbsent, none, delegate { return true; }); }); Check(hub.Writes == writes, "Absent LINK output was written.");
             var stale = Enumerable.Repeat(-1, 14).ToArray(); stale[0] = 50; Reject(delegate { link.Apply(desired, stale, delegate { return true; }); }); Check(hub.Writes == writes, "Competing app change was overwritten.");
-            var over = Enumerable.Repeat(-1, 14).ToArray(); over[0] = 101; Reject(delegate { link.Apply(over, none, delegate { return true; }); });
+            var over = Enumerable.Repeat(-1, 14).ToArray(); over[0] = LinkProtocol.MaxRpm + 1; Reject(delegate { link.Apply(over, none, delegate { return true; }); }); Check(hub.Writes == writes, "An RPM target above the supported range was written.");
             Reject(delegate { link.Apply(new int[6], new int[6], delegate { return true; }); });
 
             // --- a re-plugged chain invalidates the record instead of restoring onto other devices ---
@@ -199,6 +217,19 @@ public static class LinkBackendTests
         using (var link = new LinkController(lies)) { var target = Enumerable.Repeat(-1, 14).ToArray(); target[0] = 70; Reject(delegate { link.Apply(target, Enumerable.Repeat(-1, 14).ToArray(), delegate { return true; }); }); Check(lies.Mode == 1, "A LINK readback mismatch left the hub in software mode."); }
         var unknown = Bench(); unknown.BrokenTables = true;
         using (var link = new LinkController(unknown)) { var s = link.Read(); Check(!s.Writable && s.ControlError != null && s.Rpm[0] == 919 && unknown.Writes == 0, "Unknown stored-table layout stayed writable, or telemetry was lost with it."); Reject(delegate { link.Capture(Enumerable.Range(0, 14).Select(i => i == 0).ToArray()); }); }
+        // --- a hub the vendor application left in fixed-RPM mode is a valid starting point and is restored to it ---
+        var vendorRpm = Bench(); vendorRpm.Modes[1] = 1; vendorRpm.Powers[1] = 1200;
+        using (var link = new LinkController(vendorRpm))
+        {
+            var s = link.Read(); Check(s.Writable && s.Modes[0] == 1 && s.Powers[0] == 1200, "A vendor fixed-RPM profile disabled control.");
+            var pick = Enumerable.Range(0, 14).Select(i => i == 0).ToArray(); var before = link.Capture(pick);
+            var target = Enumerable.Repeat(-1, 14).ToArray(); target[0] = 50; link.Apply(target, Enumerable.Repeat(-1, 14).ToArray(), delegate { return true; });
+            Check(vendorRpm.Modes[1] == 0 && vendorRpm.Powers[1] == 50, "A percentage was not applied over a vendor fixed-RPM profile.");
+            link.Restore(before); Check(vendorRpm.Modes[1] == 1 && vendorRpm.Powers[1] == 1200 && vendorRpm.Mode == 1, "A captured fixed-RPM profile was not restored.");
+        }
+        // --- but a percentage slot holding more than 100 is not understood, so control stays off ---
+        var nonsense = Bench(); nonsense.Modes[1] = 0; nonsense.Powers[1] = 300;
+        using (var link = new LinkController(nonsense)) { var s = link.Read(); Check(!s.Writable && s.ControlError != null && s.Rpm[0] == 919 && nonsense.Writes == 0, "A fixed percentage above 100 was accepted as a baseline."); }
         Console.WriteLine(checks + " LINK hub checks passed; simulated hub, no hardware.");
     }
 }

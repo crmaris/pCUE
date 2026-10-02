@@ -1,5 +1,14 @@
 # pCUE — handover (canonical)
 
+## 2026-10-02 — 1.7.3: iCUE LINK hub in the cooling panel, shared revision 7 (Claude)
+
+Owner: "release pCUE with a version bump". One approved pack auto-bumped 1.7.2 → **1.7.3** (AssemblyVersion stays 1.1.0.0).
+
+- **What 1.7.3 contains beyond 1.7.2:** the Corsair iCUE LINK System Hub as a controller kind in the separate cooling panel (PR #36), refused while `iCUE.exe` runs; shared manifest **revision 7** (SHA256 `204A2953A1BA3E0C755E892692A72ACC02CDB219C40EC044C4B50E2A6F172634`, byte-identical to pCUE Light `main` after its PR #15 and to Case Tests v7.21). Revision 7 = revision 5's be quiet IO write refinement + revision 6's LINK driver + LINK fixed RPM at driver level (0–100 is a percentage, 101–9999 an RPM the hub holds itself).
+- **This application's panel is still percentage-only.** The driver accepts RPM, the panel does not send it. Lifting that for kind `link` is not done here (Case Tests v7.21 does it).
+- **Validation, local only:** `scripts/Invoke-LocalCI.ps1 -NoPack` passed (warning baseline, remote API, UI layout, sync controls, CLI e2e); cooling suite 62 CORE / 67 LINK / 158 be quiet / 3281 peripheral plus the recovery and panel checks. Packaged checks: both sidecars match, seven ZIP entries, staged exe file version 1.7.3. **No hardware run from this application**: the LINK measurements were made through Case Tests on its bench.
+- **Artifacts (unsigned, as every earlier release):** `artifacts/pCUE_1.7.3_setup.exe` 2,672,250 bytes SHA256 `72C17E2EE793D817E2E3A866F9359C95D327A2C4FDD788D18A07B61F46767F92`; `artifacts/pCUE_1.7.3_portable.zip` 720,688 bytes SHA256 `E0B4392B34C16DB9CE905E5E4714C0172416DF46B1A22D22EF336757CDA1955F`; staged `pCUE.exe` SHA256 `9D7C2A7512E3BA217C2AA8B7B2F1B57D86F3D2430C11DC27F03342DD802FBA2C`. Evidence: `artifacts/validation-1.7.3/{local-ci.log,recovery.log,pack.log,packaged-validation.log,package.json}`.
+- Publication (GitHub release, updater manifest) is recorded in the entry that follows this one once verified.
 ## 2026-10-02 — iCUE LINK System Hub driver; shared manifest revision 6 (Claude)
 
 Owner asked for the Corsair iCUE protocol to be reverse engineered on the Case Tests bench and ported to all three apps. Branch `feature/icue-link-hub` from `master`. **Source only:** no Release build, no version bump, nothing packaged or installed, and no pCUE binary was run against hardware.
