@@ -1,5 +1,8 @@
 # pCUE — handover (canonical)
 
+## 2026-10-02 — 1.7.3 publication verified (Claude)
+
+PR #37 merged into `master` as `8c0f805`; tag `v1.7.3` is that commit and carries `AssemblyFileVersion("1.7.3")`. Public GitHub release https://github.com/crmaris/pCUE/releases/tag/v1.7.3 with four assets; all four downloaded back equal to the local packages, and an anonymous download of the installer matches SHA256 `72C17E2EE793D817E2E3A866F9359C95D327A2C4FDD788D18A07B61F46767F92`. Updater manifest: `crmaris/powenetics-updates` PR #13 merged as `3f61710`; `apps.pcue` is 1.7.3 with that URL and hash, every other entry unchanged. Receipt: `artifacts/validation-1.7.3/publication.json`. Nothing was installed and nothing was run against hardware from this application. Installed copies with "On start" checking will now be told 1.7.3 is available; download and install remain two explicit confirmations.
 ## 2026-10-02 — 1.7.3: iCUE LINK hub in the cooling panel, shared revision 7 (Claude)
 
 Owner: "release pCUE with a version bump". One approved pack auto-bumped 1.7.2 → **1.7.3** (AssemblyVersion stays 1.1.0.0).
