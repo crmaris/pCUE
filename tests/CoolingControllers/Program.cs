@@ -18,6 +18,7 @@ static class Program
         try
         {
             CoreBackendTests.Run();
+            LinkBackendTests.Run();
             BeQuietBackendTests.Run();
             PeripheralBackendTests.Run();
 

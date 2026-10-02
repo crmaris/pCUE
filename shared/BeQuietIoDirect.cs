@@ -136,7 +136,9 @@ namespace Pcue.Cooling
                 try {
                     handle.DangerousAddRef(ref added); pin = GCHandle.Alloc(output, GCHandleType.Pinned);
                     operation = Marshal.AllocHGlobal(Marshal.SizeOf(typeof(IoOverlapped)));
-                    Marshal.StructureToPtr(new IoOverlapped { Event = completion.SafeWaitHandle.DangerousGetHandle() }, operation, false);
+                    // The input FileStream binds this handle to the runtime completion port. The low-order
+                    // event bit keeps this hand-built request's completion out of that port.
+                    Marshal.StructureToPtr(new IoOverlapped { Event = new IntPtr(completion.SafeWaitHandle.DangerousGetHandle().ToInt64() | 1) }, operation, false);
                     uint count;
                     if (!WriteFile(handle, pin.AddrOfPinnedObject(), (uint)output.Length, out count, operation)) {
                         int code = Marshal.GetLastWin32Error(); if (code != 997) throw new Win32Exception(code);
