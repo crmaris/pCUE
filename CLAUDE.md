@@ -17,6 +17,8 @@ Validation, local only, Debug: `tests/CoolingControllers` — 62 CORE, 51 LINK, 
 
 **Workspace.** This branch lives in the worktree `.worktrees/icue-link` (about 14 MB). Remove it with `git worktree remove` once PR #36 has merged, not before. Merge order matters: the canonical copy is pCUE Light, where revision 6 sits on the still-unmerged `fix/review-findings` (PR #13 there); Case Tests has already released revision 6 as v7.20. Nothing was built for release here and no version was bumped.
 
+**Pump commissioned on the Case Tests bench later the same day** (owner: "commission the pump"): stored 100 % = 3,056 RPM, 80 % = 2,525 RPM, 100 % again 3,054 RPM and held unattended, restore returned the curve; Case Tests' test mode forced the pump to 100 %. `shared/README.md` says so now (it is not in the manifest, so the revision stays 6). Nothing in this application was run against the hub.
+
 ## 2026-10-02 — Supported three-app controller source parity complete
 
 Case v7.19 PR17 is merged: source6f8faf7ed187f867ba9e1b8f30ce916622706df4/maina0c1c34e85be450e563cff2cbd62e3191d67232f, merged2026-10-01T21:28:23Z; remote main verified. Root checked all10 manifest4 sources/tests in each committed repository, using canonical SHA256 plus raw Git blob identity:30 files/3 manifests passed. Eight reviewed Case adapter/test/helper sources match the committed code after verifying checkout-only line-ending differences. Receipt artifacts/validation-shared-revision4/three-app-parity.json. Case GUI/CLI integrations preserve exact selection/mappings/learned child, atomic saved recovery before writes, live command guards, failed-recovery ownership, six-slot/legacyCommander arrangement and ComputerLock/TasksAll.computer ownership.
