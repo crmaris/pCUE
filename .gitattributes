@@ -6,6 +6,7 @@
 # Shared controller/test hashes must survive Windows and CI checkouts.
 shared/* text eol=lf
 tests/CoolingControllers/CoreBackendTests.cs text eol=lf
+tests/CoolingControllers/LinkBackendTests.cs text eol=lf
 tests/CoolingControllers/BeQuietBackendTests.cs text eol=lf
 tests/CoolingControllers/PeripheralBackendTests.cs text eol=lf
 

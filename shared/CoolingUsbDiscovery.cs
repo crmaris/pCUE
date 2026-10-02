@@ -24,6 +24,13 @@ namespace Pcue.Cooling
         {
             if (vendor == 0x373f && product == 0x0010 && path != null && System.Text.RegularExpressions.Regex.IsMatch(path, "&mi_00(?:[&#]|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase) && input == 65 && output == 65)
                 return new CoolingUsbInfo { Id = Identity("bequiet", path), Kind = "bequiet", Product = product, Path = path, Name = "be quiet IO cooling controller", Outputs = 2 };
+            // iCUE LINK System Hub: interface 00 carries the 512-byte protocol; interface 01 is an
+            // input-only notification endpoint (33 bytes) and is never a cooling controller.
+            if (vendor == 0x1b1c && product == 0x0c3f)
+            {
+                if (path == null || !LinkProtocol.ReportLength(input) || !LinkProtocol.ReportLength(output) || !System.Text.RegularExpressions.Regex.IsMatch(path, "&mi_00(?:[&#]|$)", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) return null;
+                return new CoolingUsbInfo { Id = Identity("link", path), Kind = "link", Product = product, Path = path, Name = "Corsair iCUE LINK System Hub", Outputs = LinkProtocol.Channels };
+            }
             if (vendor != 0x1b1c || (product != 0x0c1c && product != 0x0c2a) || path == null || !CoreProtocol.ReportLength(input) || !CoreProtocol.ReportLength(output)) return null;
             // Composite controllers expose other USB interfaces: only interface zero
             // carries this protocol. A non-composite HID path has no MI segment.
@@ -56,6 +63,7 @@ namespace Pcue.Cooling
                 if (info.Kind == "board") throw new System.IO.InvalidDataException("Motherboard connections must use the application's existing hardware monitor.");
             }
             if (info != null && info.Path != null && info.Kind == "bequiet" && info.Product == 0x0010 && info.Id == Identity(info.Kind, info.Path)) return new BeQuietIoController(info.Path, info.BridgeSerial, info.ChildSerial);
+            if (info != null && info.Path != null && info.Kind == "link" && info.Product == 0x0c3f && info.Id == Identity(info.Kind, info.Path)) return new LinkController(new LinkHidTransport(info.Path));
             if (info == null || info.Path == null || (info.Kind != "core" && info.Kind != "corext") || info.Id != Identity(info.Kind, info.Path) || info.Product != (info.Kind == "core" ? 0x0c1c : 0x0c2a)) throw new System.IO.InvalidDataException("CORE identity/product/path mismatch.");
             return new CoreController(info.Kind == "core", new CoreHidTransport(info.Path, info.Product));
         }

@@ -1,5 +1,20 @@
 # pCUE — handover (canonical)
 
+## 2026-10-02 — iCUE LINK System Hub driver; shared manifest revision 6 (Claude)
+
+Owner asked for the Corsair iCUE protocol to be reverse engineered on the Case Tests bench and ported to all three apps. Branch `feature/icue-link-hub` from `master`. **Source only:** no Release build, no version bump, nothing packaged or installed, and no pCUE binary was run against hardware.
+
+**This supersedes "three-app parity complete" below.** Canonical shared source moved twice today: revision 5 (pCUE Light `fix/review-findings` — a be quiet IO change: only the changed percentage is written once the pair is established, and the write OVERLAPPED event carries the low-order bit) and revision 6 (the LINK driver). This branch adopts **both** at once, byte-identical to pCUE Light `feature/icue-link-hub`; manifest SHA256 `5822F02B5158228343399F9FAA4C23EECE2B4B39118DAF1570D5014BC84FA482`, checked with `shared/Test-SharedSource.ps1 -CanonicalRoot`. The revision-5 be quiet change has simulated coverage only and has not been run on the IO hardware from this app.
+
+**Added:** `shared/CorsairLink.cs`, the LINK branch in `shared/CoolingUsbDiscovery.cs` (kind `link`, `1B1C:0C3F`, interface 00, 14 outputs), `tests/CoolingControllers/LinkBackendTests.cs` (51 checks). `CoolingControllersWindow` opens USB controllers through `OpenUsb`, which **refuses a LINK hub while `iCUE.exe` is running**; everything else in the window is the existing generic path (it already shows `OutputNames`, which the LINK driver fills from each device's own description).
+
+**Evidence** lives in the Case Tests repository (`CORSAIR-LINK-PROTOCOL.md`, `artifacts/usb-icue-link-20261002/`): captures of iCUE 5.51.42 including its start-up handshake, direct bounded trials on one hub with an iCUE LINK TITAN II chain, then the compiled shared driver and Case's own `--cooling` command. **Fan channel only:** 60 % gave 1,235 RPM, 45 % gave 905 RPM, restore returned the stored curve, pump never selected.
+
+**Not verified:** pump control and the 100 % pump policy, thermal runs, forced USB disconnects, other LINK devices/hubs/firmware, and this application's own window with a LINK hub. Every Read is `software mode → read → hardware mode` because the hub refuses telemetry in hardware mode. A LINK chain shows 14 outputs; empty ones are listed and cannot be selected.
+
+Validation, local only, Debug: `tests/CoolingControllers` — 62 CORE, 51 LINK, 158 be quiet, 3281 peripheral, plus the recovery and panel suites, all passing; `pCUE.csproj` Debug builds.
+
+
 ## 2026-10-02 — Supported three-app controller source parity complete
 
 Case v7.19 PR17 is merged: source6f8faf7ed187f867ba9e1b8f30ce916622706df4/maina0c1c34e85be450e563cff2cbd62e3191d67232f, merged2026-10-01T21:28:23Z; remote main verified. Root checked all10 manifest4 sources/tests in each committed repository, using canonical SHA256 plus raw Git blob identity:30 files/3 manifests passed. Eight reviewed Case adapter/test/helper sources match the committed code after verifying checkout-only line-ending differences. Receipt artifacts/validation-shared-revision4/three-app-parity.json. Case GUI/CLI integrations preserve exact selection/mappings/learned child, atomic saved recovery before writes, live command guards, failed-recovery ownership, six-slot/legacyCommander arrangement and ComputerLock/TasksAll.computer ownership.

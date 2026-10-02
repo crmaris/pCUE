@@ -65,6 +65,11 @@ public static class BeQuietBackendTests
             var baseline = controller.Capture(new[] { true, true }); Check(baseline.GlobalMode == 0 && baseline.ChildSerial == fake.CoolerSerial && fake.Writes.Count == 0, "Capture changed IO configuration.");
             controller.Apply(new[] { 50, 67 }, new[] { -1, -1 }, delegate { return true; }); Check(fake.Writes.SequenceEqual(new[] { "pump=100", "fan=67", "mode=1", "pump=50" }), "Pump-first/mode sequence missing.");
             fake.Writes.Clear(); controller.Apply(new[] { 50, 67 }, new[] { 50, 67 }, delegate { return true; }); Check(fake.Writes.Count == 0, "Unchanged profile tick kicks pump.");
+            controller.Apply(new[] { 50, 70 }, new[] { 50, 67 }, delegate { return true; }); Check(fake.Writes.SequenceEqual(new[] { "fan=70" }), "Bank-only change kicks the established pump.");
+            fake.Writes.Clear(); controller.Apply(new[] { 60, 67 }, new[] { 50, 70 }, delegate { return true; }); Check(fake.Writes.SequenceEqual(new[] { "pump=60", "fan=67" }), "Rising pump does not lead the bank change.");
+            fake.Writes.Clear(); controller.Apply(new[] { 50, 60 }, new[] { 60, 67 }, delegate { return true; }); Check(fake.Writes.SequenceEqual(new[] { "fan=60", "pump=50" }) && fake.Mode == 1, "Falling pump does not follow the bank change.");
+            fake.Writes.Clear(); Reject(delegate { controller.Apply(new[] { 70, 67 }, new[] { 50, 60 }, delegate { return fake.Writes.Count == 0; }); }); Check(fake.Writes.SequenceEqual(new[] { "pump=70" }), "Cancelled established update continued writing.");
+            fake.Writes.Clear(); controller.Apply(new[] { 50, 67 }, new[] { 70, 60 }, delegate { return true; }); fake.Writes.Clear();
             fake.Fan = 68; Reject(delegate { controller.Apply(new[] { 50, 67 }, new[] { 50, 67 }, delegate { return true; }); }); Check(fake.Writes.Count == 0, "Competing settings overwritten.");
             controller.Restore(baseline); Check(fake.Pump == 100 && fake.Fan == 48 && fake.Mode == 0, "Recovery did not restore bank/mode with full pump.");
             fake.Writes.Clear(); baseline.Modes[0] = 255; Reject(delegate { controller.Restore(baseline); }); Check(fake.Writes.Count == 0, "Corrupt baseline wrote hardware."); baseline.Modes[0] = 2;

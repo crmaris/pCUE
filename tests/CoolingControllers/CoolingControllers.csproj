@@ -23,6 +23,8 @@
     <Compile Include="..\..\shared\BeQuietIoController.cs" Link="BeQuietIoController.cs" />
     <Compile Include="CoolingRecoveryTests.cs" />
     <Compile Include="..\..\shared\CorsairCore.cs" Link="CorsairCore.cs" />
+    <Compile Include="..\..\shared\CorsairLink.cs" Link="CorsairLink.cs" />
+    <Compile Include="LinkBackendTests.cs" />
     <Compile Include="..\..\shared\CoolingUsbDiscovery.cs" Link="CoolingUsbDiscovery.cs" />
     <Compile Include="..\..\pCUE\CoolingControllersWindow.cs" Link="CoolingControllersWindow.cs" />
   </ItemGroup>

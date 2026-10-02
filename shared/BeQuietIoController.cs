@@ -129,9 +129,20 @@ namespace Pcue.Cooling
                 // Repeated profile ticks must not kick the pump to 100% and back.
                 if (!emergency && state.Modes[0] == 0 && state.Powers.SequenceEqual(desired) && (desired[0] != 0 || verifiedPumpStop)) return;
                 verifiedPumpStop = false; // A partial/failed sequence must never authorize zero feedback.
-                client.SetDuty(1, 100, allowed); // Established full pump before changing output mode/fans.
-                client.SetDuty(2, desired[1], allowed); client.SetSoftwareControl(true, allowed);
-                if (desired[0] != 100) client.SetDuty(1, desired[0], allowed);
+                // This owner's verified software-mode pair needs only its changed percentages: a rising
+                // pump leads the bank, a falling one follows it. A stopped pump keeps the full sequence.
+                if (!emergency && previous.All(v => v >= 0) && (desired[0] != 0 || state.Powers[0] != 0))
+                {
+                    if (desired[0] > state.Powers[0]) client.SetDuty(1, desired[0], allowed);
+                    if (desired[1] != state.Powers[1]) client.SetDuty(2, desired[1], allowed);
+                    if (desired[0] < state.Powers[0]) client.SetDuty(1, desired[0], allowed);
+                }
+                else
+                {
+                    client.SetDuty(1, 100, allowed); // Established full pump before changing output mode/fans.
+                    client.SetDuty(2, desired[1], allowed); client.SetSoftwareControl(true, allowed);
+                    if (desired[0] != 100) client.SetDuty(1, desired[0], allowed);
+                }
                 if (client.ReadDuty(1) != desired[0] || client.ReadDuty(2) != desired[1] || client.ReadCoolingMode() != 1) throw new IOException("IO settings readback differs; recovery is retained.");
                 verifiedPumpStop = minimumPumpDuty == 0 && desired[0] == 0;
                 if (emergency) { tripped = emergencyParked = true; controlError = "Cooling is parked at full speed. Restore before restarting."; }

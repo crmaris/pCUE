@@ -1,5 +1,5 @@
 {
-  "revision": 4,
+  "revision": 6,
   "files": [
     {
       "name": "CorsairCore.cs",
@@ -7,7 +7,7 @@
     },
     {
       "name": "CoolingUsbDiscovery.cs",
-      "sha256": "D16CA77279FE49050B9CF29CF71BDB5ED6BBA1D22944D1E9D13E52E46B727932"
+      "sha256": "9653E7643D2F909EFC3EDDAE6F3004976C0087ABBE50CE8A38243C68BA8F20A0"
     },
     {
       "name": "BeQuietIoTelemetry.cs",
@@ -15,11 +15,11 @@
     },
     {
       "name": "BeQuietIoDirect.cs",
-      "sha256": "D36F8C00C37B4778E0907A4C43020853A98DA9D0EC265FFD11E00CB647EB134C"
+      "sha256": "EA251CC15BD05F8FCC1727DC700BCC7FDB563DF440B45E270CC205C74A4CAEC4"
     },
     {
       "name": "BeQuietIoController.cs",
-      "sha256": "021E6E6A13DEBEA3056BBEAF17F5782001C8FFFB6A12F7FCD10BF432EF5E4C55"
+      "sha256": "DD7BF7489552103D2C6A1D57DB28E3A03524F4F1700102DC0A4C4F303C82F07C"
     },
     {
       "name": "OctoCoolingController.cs",
@@ -35,11 +35,19 @@
     },
     {
       "name": "BeQuietBackendTests.cs",
-      "sha256": "1EE32EF890BDFBCC67C791D3E0A5F4C60A68AD42B13CB80DF7DA1164BDA41172"
+      "sha256": "07F9E1F14DCE93963162A293FF6F600B51A0DFE2D3CF131061F5A7EE57606735"
     },
     {
       "name": "PeripheralBackendTests.cs",
       "sha256": "CFC7CDDD2A420B255BB8C8FB5D9296A0099910804E5D7121D2711527CBAD3A6F"
+    },
+    {
+      "name": "CorsairLink.cs",
+      "sha256": "3BA91B80404E829E7BCE7377F8CFA79333FA2523E0BC1E8A7BAA5443F73C0A69"
+    },
+    {
+      "name": "LinkBackendTests.cs",
+      "sha256": "C095D19B968230211F014FA2D4C7A5B18A1644CE7E5D7C588E77A4C34D1BD738"
     }
   ]
 }

@@ -67,9 +67,16 @@ namespace pCUE
         readonly bool isPreview;
         public bool PendingRecovery { get { return !isPreview && (recovery != null || File.Exists(recoveryPath)); } }
         public bool Busy { get { return busy; } }
-        public CoolingControllersWindow(bool preview = false) : this(preview, Folder, CoolingUsbDiscovery.Open) { }
+        // iCUE keeps a LINK hub in software mode and rewrites its setpoints every few seconds; the two would
+        // fight over the same fans and the vendor mutex does not prevent it. Refuse instead of sharing.
+        static INativeCoolingController OpenUsb(CoolingUsbInfo info)
+        {
+            if (info != null && info.Kind == "link") { var vendor = Process.GetProcessesByName("iCUE"); try { if (vendor.Length > 0) throw new IOException("Close Corsair iCUE before using the iCUE LINK hub."); } finally { foreach (var p in vendor) p.Dispose(); } }
+            return CoolingUsbDiscovery.Open(info);
+        }
+        public CoolingControllersWindow(bool preview = false) : this(preview, Folder, OpenUsb) { }
         public CoolingControllersWindow(LibreHardwareMonitor.Hardware.Computer host) : this(false, Folder,
-            info => info.Kind == "board" ? MotherboardCoolingController.Open(info, host.Hardware) : CoolingUsbDiscovery.Open(info),
+            info => info.Kind == "board" ? MotherboardCoolingController.Open(info, host.Hardware) : OpenUsb(info),
             () => CoolingUsbDiscovery.FindAll(host)) { }
         internal CoolingControllersWindow(bool preview, string dataFolder, Func<CoolingUsbInfo, INativeCoolingController> open, Func<CoolingUsbInfo[]> discover = null)
         {
