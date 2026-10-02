@@ -15,6 +15,8 @@ Owner asked for the Corsair iCUE protocol to be reverse engineered on the Case T
 Validation, local only, Debug: `tests/CoolingControllers` — 62 CORE, 51 LINK, 158 be quiet, 3281 peripheral, plus the recovery and panel suites, all passing; `pCUE.csproj` Debug builds.
 
 
+**Workspace.** This branch lives in the worktree `.worktrees/icue-link` (about 14 MB). Remove it with `git worktree remove` once PR #36 has merged, not before. Merge order matters: the canonical copy is pCUE Light, where revision 6 sits on the still-unmerged `fix/review-findings` (PR #13 there); Case Tests has already released revision 6 as v7.20. Nothing was built for release here and no version was bumped.
+
 ## 2026-10-02 — Supported three-app controller source parity complete
 
 Case v7.19 PR17 is merged: source6f8faf7ed187f867ba9e1b8f30ce916622706df4/maina0c1c34e85be450e563cff2cbd62e3191d67232f, merged2026-10-01T21:28:23Z; remote main verified. Root checked all10 manifest4 sources/tests in each committed repository, using canonical SHA256 plus raw Git blob identity:30 files/3 manifests passed. Eight reviewed Case adapter/test/helper sources match the committed code after verifying checkout-only line-ending differences. Receipt artifacts/validation-shared-revision4/three-app-parity.json. Case GUI/CLI integrations preserve exact selection/mappings/learned child, atomic saved recovery before writes, live command guards, failed-recovery ownership, six-slot/legacyCommander arrangement and ComputerLock/TasksAll.computer ownership.
