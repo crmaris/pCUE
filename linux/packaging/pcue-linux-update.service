@@ -1,0 +1,10 @@
+[Unit]
+Description=Install verified pCUE Linux updates when the application is closed
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/pcue-linux/update-linux.py --deb
+TimeoutStartSec=8min
+UMask=0077

@@ -58,13 +58,12 @@ namespace pCUE
     /// stamped into the running executable. Security rules, kept deliberately strict:
     ///   1. HTTPS only - plain HTTP is rejected for both the manifest and the download.
     ///   2. The manifest MUST supply a sha256; a download whose hash does not match is deleted.
-    ///   3. A download is NEVER executed automatically. The caller confirms with the user and
-    ///      launches the installer, because a running app cannot overwrite its own files.
-    ///   4. Checking never installs anything by itself.
+    ///   3. Installation is coordinated by the caller and deferred while cooling is active.
+    ///   4. Development/portable copies cannot silently replace a registered installation.
     ///
     /// TRUST: rules 1-2 are INTEGRITY, not authenticity. A compromised manifest repo serving a
     /// matching url+sha256 would be accepted with an empty signer pin, then launched elevated
-    /// after the user's two confirms. A configured pin additionally requires valid Windows
+    /// when the application is idle. A configured pin additionally requires valid Windows
     /// Authenticode trust and the verified signer's certificate thumbprint.
     ///
     /// Manifest shape (the shared Cybenetics manifest):
@@ -73,6 +72,36 @@ namespace pCUE
     /// </summary>
     public sealed class AppUpdateService : IDisposable
     {
+        public static bool AutomaticUpdateEligible(bool controllerPanelOpen, bool savedRecovery, bool acquisitionLeased, bool rpmHoldRunning, bool commanderConnected, bool remoteMode)
+        {
+            return !controllerPanelOpen && !savedRecovery && !acquisitionLeased && !rpmHoldRunning && !commanderConnected && !remoteMode;
+        }
+        public static bool IsInstalledCopy()
+        {
+            try
+            {
+                string running = Path.GetFullPath(Process.GetCurrentProcess().MainModule.FileName);
+                const string keyName = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{FFD36531-9723-41F5-B7F1-EF00D5E83765}_is1";
+                foreach (var view in new[] { Microsoft.Win32.RegistryView.Registry64, Microsoft.Win32.RegistryView.Registry32 })
+                using (var root = Microsoft.Win32.RegistryKey.OpenBaseKey(Microsoft.Win32.RegistryHive.LocalMachine, view))
+                using (var key = root.OpenSubKey(keyName))
+                {
+                    string location = key?.GetValue("InstallLocation") as string;
+                    if (!string.IsNullOrWhiteSpace(location) && string.Equals(running, Path.GetFullPath(Path.Combine(location, "pCUE.exe")), StringComparison.OrdinalIgnoreCase)) return true;
+                }
+            }
+            catch (Exception ex) { Debug.WriteLine("pCUE: installed-copy check failed: " + ex.Message); }
+            return false;
+        }
+        public static void VerifyInstallerBeforeLaunch(string path, string expectedSha256)
+        {
+            using (var stream = File.OpenRead(path))
+            using (var hash = SHA256.Create())
+            {
+                string actual = BitConverter.ToString(hash.ComputeHash(stream)).Replace("-", "");
+                if (!string.Equals(actual, expectedSha256, StringComparison.OrdinalIgnoreCase)) throw new InvalidDataException("The verified installer changed before launch.");
+            }
+        }
         /// <summary>
         /// Shared Cybenetics update manifest (public repo, so it is readable anonymously).
         /// Overridable via the Update_Manifest_Url setting.

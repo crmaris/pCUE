@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>pcue-linux</AssemblyName>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <Version>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)../pCUE/Properties/AssemblyInfo.cs')), 'AssemblyFileVersion\(&quot;([^&quot;]+)&quot;\)').Groups[1].Value)</Version>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <NoWarn>$(NoWarn);CS0612</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.22" />
+    <PackageReference Include="Avalonia.Headless" Version="11.3.22" />
+    <PackageReference Include="HidSharp" Version="2.1.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+    <Compile Include="../pCUE/CommanderProDevice.cs" Link="Shared/CommanderProDevice.cs" />
+    <Compile Include="../pCUE/CorsairLightingProtocolConstants.cs" Link="Shared/CorsairLightingProtocolConstants.cs" />
+    <Compile Include="../pCUE/Diagnostics/AppLog.cs" Link="Shared/AppLog.cs" />
+    <Compile Include="../pCUE/Control/PwmAcquisitionModels.cs" Link="Shared/PwmAcquisitionModels.cs" />
+    <Compile Include="../pCUE/Control/FanRpmHoldController.cs" Link="Shared/FanRpmHoldController.cs" />
+    <Compile Include="../pCUE/Tachometer/HidTachometer.cs" Link="Shared/HidTachometer.cs" />
+    <Compile Include="../pCUE/Tachometer/BenchTachometerOwnership.cs" Link="Shared/BenchTachometerOwnership.cs" />
+    <Compile Include="../pCUE/Remote/PcueRemoteModels.cs" Link="Shared/PcueRemoteModels.cs" />
+    <Compile Include="../pCUE/Remote/PcueRemoteClient.cs" Link="Shared/PcueRemoteClient.cs" />
+    <Compile Include="../pCUE/Remote/DiscoveryBeacon.cs" Link="Shared/DiscoveryBeacon.cs" />
+    <Compile Include="../pCUE/Remote/RemoteControlServer.cs" Link="Shared/RemoteControlServer.cs" />
+    <Compile Include="../shared/CorsairCore.cs" Link="Shared/CorsairCore.cs" />
+    <Compile Include="../shared/CorsairLink.cs" Link="Shared/CorsairLink.cs" />
+    <Compile Include="../shared/OctoCoolingController.cs" Link="Shared/OctoCoolingController.cs" />
+  </ItemGroup>
+</Project>

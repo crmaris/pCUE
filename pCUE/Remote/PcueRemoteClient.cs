@@ -88,6 +88,15 @@ namespace pCUE
             if (wasConnected) RaiseConnectionChanged(false, "Disconnected");
         }
 
+        public Task<PcueApiActionResponse> SetFanDutyAsync(int fan, int percent) =>
+            PostAsync("fan/duty?fan=" + fan + "&value=" + percent, null);
+
+        public Task<PcueApiActionResponse> SetFanRpmAsync(int fan, int rpm) =>
+            PostAsync("fan/rpm?fan=" + fan + "&value=" + rpm, null);
+
+        public Task<PcueApiActionResponse> StartHoldAsync(int fan, int rpm) =>
+            PostAsync("hold/start?fan=" + fan + "&rpm=" + rpm, null);
+
         public Task<PcueApiActionResponse> SetFanModeAsync(int fan, string mode) =>
             PostAsync("fan/mode?fan=" + fan + "&value=" + Uri.EscapeDataString(mode ?? ""), null);
 

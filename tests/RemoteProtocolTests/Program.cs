@@ -249,6 +249,13 @@ namespace pCUE.RemoteProtocolTests
             Assert(AppUpdateService.GetAuthenticodeThumbprint("Z:\\no\\such\\file.exe") == null,
                 "missing file has no signer");
             CheckAuthenticodeTampering();
+            Assert(AppUpdateService.AutomaticUpdateEligible(false, false, false, false, false, false), "idle application may auto-update");
+            for (int busy = 0; busy < 6; busy++)
+            {
+                var flags = new bool[6]; flags[busy] = true;
+                Assert(!AppUpdateService.AutomaticUpdateEligible(flags[0], flags[1], flags[2], flags[3], flags[4], flags[5]), "active ownership/recovery blocks unattended update");
+            }
+            Assert(!AppUpdateService.IsInstalledCopy(), "development test copy cannot replace a registered installation");
         }
 
         private static void CheckAuthenticodeTampering()

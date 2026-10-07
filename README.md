@@ -103,8 +103,10 @@ the cases apart: `0` success, `1` pCUE refused the request, `2` no pCUE reachabl
 
 - **Auto Start** registers a Windows logon scheduled task (highest privileges), so pCUE starts
   elevated without a UAC prompt on every logon.
-- **Check for Updates** verifies the download's SHA-256 and always asks twice before installing
-  (download, then launch the installer). A configured signer thumbprint additionally requires a
+- **Automatic updates** check every 30 minutes and install verified packages silently when cooling is idle.
+  Controllers must be disconnected, RPM hold/acquisition stopped and saved recovery restored.
+  Registered installations restart after updating; Windows development/portable copies remain open.
+  The Automatic checkbox disables periodic updates. A configured signer thumbprint additionally requires a
   valid embedded Authenticode signature trusted by Windows and the verified signer's exact
   certificate. Signature verification uses the local Windows trust cache. With an empty pin,
   unsigned releases remain protected by HTTPS and the manifest checksum only.
@@ -123,6 +125,12 @@ dither descend + live retarget, post-Stop `/status` honesty) and prints C as a m
 pwsh tools\bench-validate.ps1 -Server 192.168.1.20 -Token <secret>
 pwsh tools\bench-validate.ps1 -Server 127.0.0.1 -DryRun   # offline: validate + plan only
 ```
+
+## Linux
+
+The native Linux desktop is supplied as an Ubuntu/Debian `.deb` installer and a
+self-contained portable archive. See [LINUX.md](LINUX.md) for installation,
+automatic updates, USB permissions, supported features and commissioning limits.
 
 ## Building
 
