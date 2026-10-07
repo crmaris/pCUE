@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=pCUE Linux
+Comment=Fan and pump controls for Corsair Commander and Aquacomputer OCTO
+Exec=pcue-linux
+Icon=pcue-linux
+Terminal=false
+Categories=System;Monitor;
+StartupNotify=true

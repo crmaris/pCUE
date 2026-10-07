@@ -1,5 +1,59 @@
 # pCUE — handover (canonical)
 
+## 2026-10-08 — Linux desktop and unattended updates, 1.7.4 prepared
+
+Owner requested Linux readiness/package, then "make auto updates full auto".
+`linux/pCUE.Linux.csproj` adds a .NET 10 / Avalonia 11.3.22 desktop, targeting
+Ubuntu/Debian x64. It links the existing Commander PRO, HID tachometer, RPM-hold,
+protocol-v2 client/server and canonical CORE/XT, LINK and OCTO wire drivers;
+HidSharp stays 2.1.0 and all shared revision-7 source hashes remain unchanged.
+Linux discovery validates the actual sysfs interface and stable USB topology/
+serial; recovery is saved and flushed before control, reopens exact identity,
+and retains failed restore. Pump commands have the existing 25% floor.
+Linux CPU telemetry uses proc/hwmon. Windows-native be quiet IO, motherboard PWM,
+local acoustic leases and Windows services are explicitly unavailable there.
+`LINUX.md` has installation and feature boundaries. No physical Linux USB control,
+unattended real upgrade, deployment or installation has been exercised.
+
+Windows periodic updates now silently download/verify/install and restart the
+registered app, without either former confirmation dialog. They defer while a
+Commander, remote target, cooling panel, recovery, acquisition or RPM hold is
+active. Portable/development Windows copies cannot replace a registered install.
+The Auto checkbox controls periodic checks. Linux Debian packages enable a
+30-minute systemd updater with a cross-runtime session lock and persistent
+recovery markers; updates wait until the app closes and recovery is complete.
+Portable Linux updates verify a staged runtime/version before the GUI exits,
+swap the directory and restart, with failed preparation leaving the app open.
+Both Linux update paths enforce HTTPS, numeric versions, exact public release
+repository, SHA256 and safe archive/package identity. Feed key is `apps.pcue-linux`.
+
+Validation: full Windows LocalCI-NoPack passed, including unchanged warning
+baseline, 62 CORE / 67 LINK / 158 IO / 3281 peripheral conformance checks,
+recovery, RPM/acquisition, remote/security, CLI and WPF geometry/interlocks.
+Linux .NET builds have zero warnings; Ubuntu 22.04 WSL ran 54 simulated checks,
+including .NET/Python lock interoperability, persistent recovery guards, exact
+restore, selected remote commands and JSON parity. Four Python updater test
+groups passed. Eight Linux-rendered PRO/LINK dark/light previews at widths
+1120/860 passed geometry and were inspected. Default height is 880; live startup
+clamps to the display and smaller windows retain scrollable outputs/actions.
+WSL's Windows-mounted filesystem does not enforce Unix mode bits, so the 0600
+assertion is explicitly unavailable there; no native Linux permission proof is
+claimed. Linux inventory is empty, as expected without USB pass-through.
+Rendering PC gateway was unavailable and GX10 dedicated preflight failed on the
+AI Check context guard; primary model completed the work without service changes.
+
+One Windows release pack automatically stamped **1.7.4**; AssemblyVersion remains
+1.1.0.0. Installer `artifacts/pCUE_1.7.4_setup.exe`, 2,673,681 bytes, SHA256
+`1A8AAC8A4CC35AAFDCAD57A62842EE42EB0D94303A777664FA5BF0AD25C97C48`;
+portable 721,821 bytes, SHA256
+`DED5FA22B9CAB0B2F9F9D1F67BA5D54BDC0C48AB1A58CE5C974D8F4551026191`.
+Retained evidence: `artifacts/validation-1.7.4-linux/{windows-ci.log,windows-pack.log,
+linux-tests.log,linux-ui.log,ui/}`. Removed only task-built test/smoke runtimes,
+obsolete preliminary previews and the license-collection probe after retaining
+the evidence. Existing owner outputs/worktree and older release evidence remain.
+Linux package assembly and source/release/feed publication receipts follow after
+verification; the Windows update feed still serves 1.7.3 at this preparation step.
+
 ## 2026-10-02 — 1.7.3 publication verified (Claude)
 
 PR #37 merged into `master` as `8c0f805`; tag `v1.7.3` is that commit and carries `AssemblyFileVersion("1.7.3")`. Public GitHub release https://github.com/crmaris/pCUE/releases/tag/v1.7.3 with four assets; all four downloaded back equal to the local packages, and an anonymous download of the installer matches SHA256 `72C17E2EE793D817E2E3A866F9359C95D327A2C4FDD788D18A07B61F46767F92`. Updater manifest: `crmaris/powenetics-updates` PR #13 merged as `3f61710`; `apps.pcue` is 1.7.3 with that URL and hash, every other entry unchanged. Receipt: `artifacts/validation-1.7.3/publication.json`. Nothing was installed and nothing was run against hardware from this application. Installed copies with "On start" checking will now be told 1.7.3 is available; download and install remain two explicit confirmations.

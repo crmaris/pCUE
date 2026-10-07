@@ -163,7 +163,7 @@
             </Grid>
         </GroupBox>
         <Button x:Name="Update_Check_Button" Content="Check for Updates" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="23,524,0,0" Width="120" Height="24" Background="#FF3806FB" Foreground="#FFFBF5F5" Click="Update_Check_Button_Click"/>
-        <CheckBox x:Name="Update_On_Start_CheckBox" Content="On start" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="153,529,0,0" Foreground="#FFF5EFEF" ToolTip="Check for a newer pCUE version when the app starts (checks only - never installs on its own)" Checked="Update_On_Start_Changed" Unchecked="Update_On_Start_Changed"/>
+        <CheckBox x:Name="Update_On_Start_CheckBox" Content="Auto" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="153,529,0,0" Foreground="#FFF5EFEF" ToolTip="Check every 30 minutes and install verified updates automatically when controllers are disconnected and recovery is complete" Checked="Update_On_Start_Changed" Unchecked="Update_On_Start_Changed"/>
         <TextBlock x:Name="Update_Status_Label" Grid.ColumnSpan="2" Text="" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="225,529,0,0" Width="379" Height="20" TextTrimming="CharacterEllipsis" FontWeight="Bold" Foreground="White"/>
 
         <Label Content="Target:" Style="{StaticResource White_Labels}" Grid.ColumnSpan="2" HorizontalAlignment="Left" VerticalAlignment="Top" Margin="16,556,0,0" Height="25"/>

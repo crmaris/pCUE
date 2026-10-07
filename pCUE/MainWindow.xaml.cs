@@ -174,10 +174,13 @@ namespace pCUE
         }
 
         //In-app updater (HTTPS manifest + sha256 integrity check; never installs on its own).
-        //NOTE: integrity only, not authenticity - a compromised manifest repo serving a matching
-        //url+sha256 would be accepted. The installer is launched only after two user confirms and
-        //is never executed automatically; see AppUpdateService for the trust statement.
+        //HTTPS/checksum protect integrity; an optional trusted signer pin adds authenticity.
         AppUpdateService updateService;
+        System.Windows.Threading.DispatcherTimer automaticUpdateTimer;
+        bool updateBusy;
+        DateTime nextUpdateCheckUtc = DateTime.MinValue;
+        AppUpdateInfo pendingUpdate;
+        string pendingInstaller;
         //Set while an update installer is being launched, so Window_Closing skips its
         //"Really close?" prompt - the user has already confirmed the update.
         bool suppressCloseConfirm = false;
@@ -290,13 +293,16 @@ namespace pCUE
                 }), System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             }
 
-            //Optional start-up update check. It only reports into the status line - it never
-            //pops a dialog and never installs anything by itself.
+            //Checks and installs run after the window loads, with idle control/recovery guards.
             Update_On_Start_CheckBox.IsChecked = Properties.Settings.Default.Update_Check_On_Start;
-            if (Properties.Settings.Default.Update_Check_On_Start)
+            automaticUpdateTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            automaticUpdateTimer.Tick += async (sender, args) =>
             {
-                _ = RunUpdateCheck(false);
-            }
+                if (!Properties.Settings.Default.Update_Check_On_Start || updateBusy) return;
+                if (pendingUpdate != null && CanInstallCoolingUpdate) await RunUpdateCheck(false);
+                else if (DateTime.UtcNow >= nextUpdateCheckUtc) await RunUpdateCheck(false);
+            };
+            automaticUpdateTimer.Start();
 
             // USB re-enumeration: a Commander unplugged and re-plugged while the app runs fires
             // HidSharp's device-list change; with auto-connect on, retry the open (debounced).
@@ -403,6 +409,7 @@ namespace pCUE
             try { bench_tach?.Dispose(); }
             catch (Exception ex) { Debug.WriteLine("pCUE: tach dispose failed: " + ex.Message); }
 
+            automaticUpdateTimer?.Stop();
             try { updateService?.Dispose(); }
             catch (Exception ex) { Debug.WriteLine("pCUE: update service dispose failed: " + ex.Message); }
 
@@ -2679,8 +2686,7 @@ namespace pCUE
         static readonly System.Windows.Media.Brush UpdateInfoBrush = System.Windows.Media.Brushes.White;
         static readonly System.Windows.Media.Brush UpdateAlertBrush = System.Windows.Media.Brushes.Yellow;
 
-        //Manual check. Reports the outcome inline and, when a newer build exists, offers to
-        //download it. Nothing is ever downloaded or launched without the user saying so.
+        //Manual and periodic checks use the same unattended installer path.
         private async void Update_Check_Button_Click(object sender, RoutedEventArgs e)
         {
             await RunUpdateCheck(true);
@@ -2692,19 +2698,18 @@ namespace pCUE
             Properties.Settings.Default.Save();
         }
 
-        //Shared by the button and the optional start-up check. When interactive is false this only
-        //reports (start-up must never pop dialogs); when true it may offer the download.
         private async Task RunUpdateCheck(bool interactive)
         {
-            if (updateService == null) return;
+            if (updateService == null || updateBusy) return;
+            updateBusy = true;
+            nextUpdateCheckUtc = DateTime.UtcNow.AddMinutes(30);
 
             if (interactive) Update_Check_Button.IsEnabled = false;
             SetUpdateStatus("Checking for updates...", UpdateInfoBrush);
 
             try
             {
-                AppUpdateInfo info = await updateService
-                    .CheckAsync(Properties.Settings.Default.Update_Manifest_Url);
+                AppUpdateInfo info = pendingUpdate ?? await updateService.CheckAsync(Properties.Settings.Default.Update_Manifest_Url);
 
                 switch (info.State)
                 {
@@ -2714,7 +2719,8 @@ namespace pCUE
 
                     case UpdateCheckState.UpdateAvailable:
                         SetUpdateStatus(info.Message, UpdateAlertBrush);
-                        if (interactive) await OfferUpdate(info);
+                        pendingUpdate = info;
+                        await OfferUpdate(info);
                         break;
 
                     default:
@@ -2733,20 +2739,17 @@ namespace pCUE
             }
             finally
             {
+                updateBusy = false;
                 if (interactive) Update_Check_Button.IsEnabled = true;
             }
         }
 
-        //Download (verified) then, after a second explicit confirmation, launch the installer and
-        //close pCUE - a running app cannot overwrite its own files.
-        private bool CanInstallCoolingUpdate { get { return coolingControllersWindow == null && !CoolingControllersWindow.HasSavedRecovery && !AcquisitionLeased && (rpmHold == null || !rpmHold.IsRunning); } }
+        //Never replace an application that is actively controlling or recovering cooling hardware.
+        private bool CanInstallCoolingUpdate { get { return AppUpdateService.AutomaticUpdateEligible(coolingControllersWindow != null, CoolingControllersWindow.HasSavedRecovery, AcquisitionLeased, rpmHold != null && rpmHold.IsRunning, Corsair_Commander_Connected, IsRemoteMode); } }
         private async Task OfferUpdate(AppUpdateInfo info)
         {
-            if (!CanInstallCoolingUpdate) { SetUpdateStatus("Stop RPM hold/acquisition and restore/close cooling controllers before installing an update.", UpdateAlertBrush); return; }
-            MessageBoxResult wants = MessageBox.Show(
-                info.Message + "\n\nDownload it now?",
-                "pCUE update available", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (wants != MessageBoxResult.Yes) return;
+            if (!CanInstallCoolingUpdate) { SetUpdateStatus("Update queued; it will install automatically after controllers are disconnected and saved recovery is restored.", UpdateAlertBrush); return; }
+            if (!AppUpdateService.IsInstalledCopy()) { SetUpdateStatus("Automatic updates apply to installed pCUE copies; this development/portable copy will stay open.", UpdateAlertBrush); pendingUpdate = null; return; }
 
             string installer;
             try
@@ -2755,40 +2758,35 @@ namespace pCUE
                 // Optional signer pin (empty = integrity-only). Set Update_Signer_Thumbprint once a
                 // release-signing cert exists; then unsigned/wrong-signer downloads are refused.
                 updateService.ExpectedSignerThumbprint = Properties.Settings.Default.Update_Signer_Thumbprint ?? "";
-                installer = await updateService.DownloadVerifiedInstallerAsync(info, progress);
+                installer = pendingInstaller ?? await updateService.DownloadVerifiedInstallerAsync(info, progress);
+                pendingInstaller = installer;
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("pCUE: update download failed: " + ex.Message);
                 SetUpdateStatus("Download failed: " + ex.Message, UpdateAlertBrush);
-                MessageBox.Show(ex.Message, "pCUE update", MessageBoxButton.OK, MessageBoxImage.Warning);
+                pendingUpdate = null;
+                pendingInstaller = null;
                 return;
             }
 
             SetUpdateStatus("Downloaded and verified pCUE " + info.AvailableVersion + ".", UpdateInfoBrush);
 
-            MessageBoxResult install = MessageBox.Show(
-                "pCUE " + info.AvailableVersion + " was downloaded and its checksum verified.\n\n" +
-                "pCUE must close so the installer can replace its files. Run the installer now?",
-                "Install update", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (install != MessageBoxResult.Yes)
-            {
-                SetUpdateStatus("Installer saved to " + installer, UpdateAlertBrush);
-                return;
-            }
-
             try
             {
-                // Ownership may change during download or either confirmation.
+                // Ownership may change during download. Recheck immediately before launch.
                 if (!CanInstallCoolingUpdate) { SetUpdateStatus("Cooling is busy or recovery is pending. Installer was not launched.", UpdateAlertBrush); return; }
-                Process.Start(new ProcessStartInfo(installer) { UseShellExecute = true });
-                suppressCloseConfirm = true;    //the user already confirmed; skip "Really close?"
+                AppUpdateService.VerifyInstallerBeforeLaunch(installer, info.Sha256);
+                Process.Start(new ProcessStartInfo(installer) { UseShellExecute = true, Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /PCUEAUTORESTART" });
+                suppressCloseConfirm = true;
                 Application.Current.Shutdown();
             }
             catch (Exception ex)
             {
                 Debug.WriteLine("pCUE: could not launch installer: " + ex.Message);
                 SetUpdateStatus("Could not launch the installer: " + ex.Message, UpdateAlertBrush);
+                pendingUpdate = null;
+                pendingInstaller = null;
             }
         }
 
