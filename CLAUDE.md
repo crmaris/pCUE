@@ -1,5 +1,48 @@
 # pCUE — handover (canonical)
 
+## 2026-10-08 — 1.7.4 Windows/Linux publication and live feeds verified
+
+Source PR **#39** merged into `master` as
+`ed7e6b4f1f173a106ba33031f7c34946fb3a21d5`; public tag **v1.7.4** points there.
+Release: https://github.com/crmaris/pCUE/releases/tag/v1.7.4 . All eight assets
+(four packages plus their sidecars) were downloaded anonymously and matched the
+prepared bytes and GitHub server digests. Windows hashes are in the preparation
+entry below. Linux Debian package `artifacts/pcue-linux_1.7.4_amd64.deb`,
+43,417,204 bytes, SHA256
+`A35D2FF213705611A79F9ECB8A2FB58AB6580599B981DB8DF32C0B8959D19D29`;
+portable `artifacts/pCUE_1.7.4_linux-x64.tar.gz`, 43,413,238 bytes, SHA256
+`EF9D4CED93C6832F5A5A52C467F3ADE6F138FD4252A315C2F038DF65B86D6F43`.
+
+Debian metadata, all 238 portable payloads, exact staged runtime bytes, executable
+modes, update timer/service, scoped USB rules, persistent recovery directory and
+both sidecars passed. Both extracted executables report 1.7.4. The actual
+packaged Ubuntu 22.04 X11 desktop opened/rendered at 1120x880 with no controllers
+connected and was inspected; screenshot/log retained. Packaged Windows checks
+passed all six update guards, pre-launch hash/tamper rejection, stable assembly
+identity, file version and seven exact ZIP payloads.
+
+Update-feed PR **#14** in `crmaris/powenetics-updates` merged as
+`6becbfda745bf87aca3cbbc8ffb011d0bb019103`. Anonymous live `components.json`
+reports **apps.pcue=1.7.4** and **apps.pcue-linux=1.7.4**, with matching public
+URLs/hashes. Concurrent Linux Widget entries and every unrelated entry were
+preserved against the latest remote base. Actual packaged Windows and Linux
+updater parsers accept the live feed, offer 1.7.4 to 1.7.3 and do not reinstall
+the current version. Existing Windows 1.7.3 installs need their normal initial
+upgrade before the new unattended behavior is available. No app was installed,
+no real unattended upgrade was run and physical Linux USB commissioning remains
+pending; the feature limits in `LINUX.md` remain explicit.
+
+Retained provenance: `artifacts/validation-1.7.4-linux/` contains package.json,
+publication.json, release-assets.json, anonymous-downloads.json, live-components.json,
+Windows CI/pack/package/live-updater logs, Linux tests/UI/pack/package/live-updater
+logs, eight illustrative UI images and the actual native-desktop image/log.
+Temporary runtime extractions, duplicate publication downloads, merged public
+feed clone, empty test-only state, probes and new Linux bin/obj trees were removed
+after checks; the cleanup completed after clearing read-only Git object bits.
+Both merged source/feed branches were removed. No owner worktree, older evidence,
+credentials, installed files, services or hardware were changed. All four new
+release packages and prior owner releases/evidence remain.
+
 ## 2026-10-08 — Linux desktop and unattended updates, 1.7.4 prepared
 
 Owner requested Linux readiness/package, then "make auto updates full auto".
