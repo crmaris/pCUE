@@ -10,6 +10,12 @@ tests/CoolingControllers/LinkBackendTests.cs text eol=lf
 tests/CoolingControllers/BeQuietBackendTests.cs text eol=lf
 tests/CoolingControllers/PeripheralBackendTests.cs text eol=lf
 
+# Linux service/rule scripts must survive a Windows checkout with Unix line endings.
+linux/packaging/* text eol=lf
+build/package-linux.py text eol=lf
+# Preserve upstream license/notice bytes, including their intentional whitespace.
+linux/licenses/* -text -whitespace
+
 # Binaries shipped or referenced by this repo: never normalize or merge them.
 *.ico binary
 *.exe binary
