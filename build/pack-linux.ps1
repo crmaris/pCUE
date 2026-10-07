@@ -17,9 +17,9 @@ if ($IsWindows) {
 }
 $project = Join-Path $root 'linux/pCUE.Linux.csproj'
 if ($IsWindows) {
-    & 'C:\Users\ARIS\.codex\scripts\safe-dotnet.ps1' publish $project -c Release -r linux-x64 --self-contained true --locked-mode -o $PublishDirectory
+    & 'C:\Users\ARIS\.codex\scripts\safe-dotnet.ps1' publish $project -c Release -r linux-x64 --self-contained true -p:RestoreLockedMode=true -o $PublishDirectory
 } else {
-    & dotnet publish $project -c Release -r linux-x64 --self-contained true --locked-mode -o $PublishDirectory --disable-build-servers -m:1 -nr:false -p:UseSharedCompilation=false
+    & dotnet publish $project -c Release -r linux-x64 --self-contained true -p:RestoreLockedMode=true -o $PublishDirectory --disable-build-servers -m:1 -nr:false -p:UseSharedCompilation=false
 }
 if ($LASTEXITCODE -ne 0) { throw 'Linux publication failed.' }
 $epoch = (& git -C $root log -1 --format=%ct).Trim()

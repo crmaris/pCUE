@@ -99,9 +99,9 @@ The Linux source is `linux/pCUE.Linux.csproj`. Install .NET SDK 10 to build from
 source. Locked dependencies are in `linux/packages.lock.json`.
 
 ```sh
-dotnet build linux/pCUE.Linux.csproj --locked-mode
+dotnet build linux/pCUE.Linux.csproj -p:RestoreLockedMode=true
 dotnet run --project linux/tests/pCUE.Linux.Tests.csproj
-dotnet publish linux/pCUE.Linux.csproj -c Release -r linux-x64 --self-contained true --locked-mode -o .codex-tmp/linux/publish
+dotnet publish linux/pCUE.Linux.csproj -c Release -r linux-x64 --self-contained true -p:RestoreLockedMode=true -o .codex-tmp/linux/publish
 python3 build/package-linux.py --publish .codex-tmp/linux/publish --output artifacts --version <stamped-version> --epoch "$(git log -1 --format=%ct)"
 ```
 
